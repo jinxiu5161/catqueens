@@ -157,51 +157,64 @@ export class GameSession {
   }
 
   private swipeActive = false;
-  private swipeBefore: BoardCommand['before'] = [];
-  private swipeAfter: BoardCommand['after'] = [];
-  private swipeSeen = new Set<number>();
+  private swipeLastIndex = -1;
+  /** Board snapshot at stroke start — used to build one undo command with net diffs. */
+  private swipeStartBoard: CellState[] | null = null;
 
-  /** Start a swipe-exclude stroke (one undo command for the whole stroke). */
+  /** Start a swipe stroke (one undo command for the whole stroke). */
   beginSwipeExclude(): void {
     this.swipeActive = true;
-    this.swipeBefore = [];
-    this.swipeAfter = [];
-    this.swipeSeen.clear();
+    this.swipeLastIndex = -1;
+    this.swipeStartBoard = [...this.board];
   }
 
   /**
-   * Live paint: as the finger enters a cell, show exclude immediately on EMPTY.
-   * CAT cells are skipped — the cat stays, no exclude icon.
+   * Live paint as the finger enters a cell:
+   * - EMPTY → EXCLUDED
+   * - EXCLUDED → EMPTY (swipe back clears exclude)
+   * - CAT → unchanged
+   * Re-entering a cell in the same stroke toggles again.
    */
   paintSwipeExclude(index: number): SessionSnapshot {
     if (this.won || !this.swipeActive || !this.inBounds(index)) return this.emit();
-    if (this.swipeSeen.has(index)) return this.emit();
-    this.swipeSeen.add(index);
-    // Never mark exclude on a cat (or already excluded)
-    if (this.board[index] !== 'EMPTY') return this.emit();
-    this.swipeBefore.push({ index, state: 'EMPTY' });
-    this.swipeAfter.push({ index, state: 'EXCLUDED' });
-    this.board[index] = 'EXCLUDED';
+    // Stay on same cell: do not flip repeatedly while finger jitters inside it
+    if (index === this.swipeLastIndex) return this.emit();
+    this.swipeLastIndex = index;
+
+    const cur = this.board[index]!;
+    if (cur === 'CAT') return this.emit();
+    if (cur === 'EMPTY') this.board[index] = 'EXCLUDED';
+    else if (cur === 'EXCLUDED') this.board[index] = 'EMPTY';
+    else return this.emit();
+
     this.eliteFailed = false;
-    // Live visual only; undo stack updated on endSwipeExclude
     return this.emit();
   }
 
-  /** Finish swipe: commit as a single BULK_EXCLUDE command. */
+  /** Finish swipe: commit net changes vs stroke start as one command. */
   endSwipeExclude(): SessionSnapshot {
     if (!this.swipeActive) return this.emit();
     this.swipeActive = false;
-    if (this.swipeAfter.length === 0) return this.emit();
-    const cmd: BoardCommand = {
+    const start = this.swipeStartBoard;
+    this.swipeStartBoard = null;
+    this.swipeLastIndex = -1;
+    if (!start) return this.emit();
+
+    const before: BoardCommand['before'] = [];
+    const after: BoardCommand['after'] = [];
+    for (let i = 0; i < this.board.length; i++) {
+      if (start[i] === this.board[i]) continue;
+      before.push({ index: i, state: start[i]! });
+      after.push({ index: i, state: this.board[i]! });
+    }
+    if (after.length === 0) return this.emit();
+
+    this.undoStack.push({
       type: 'BULK_EXCLUDE',
-      before: this.swipeBefore,
-      after: this.swipeAfter,
+      before,
+      after,
       timestamp: Date.now(),
-    };
-    this.swipeBefore = [];
-    this.swipeAfter = [];
-    this.swipeSeen.clear();
-    this.undoStack.push(cmd);
+    });
     if (this.undoStack.length > 50) this.undoStack.shift();
     this.redoStack = [];
     this.persistRun();
@@ -209,7 +222,7 @@ export class GameSession {
   }
 
   /**
-   * Batch exclude (e.g. tests): EMPTY → EXCLUDED; CAT cells skipped.
+   * Batch path (tests): visit indexes in order with toggle semantics; CAT skipped.
    */
   applySwipeExclude(indexes: number[]): SessionSnapshot {
     this.beginSwipeExclude();

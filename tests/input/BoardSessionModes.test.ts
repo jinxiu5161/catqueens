@@ -68,7 +68,7 @@ describe('GameSession board modes (15.4 soft / strict)', () => {
     snap = session.applyDoubleTap(3);
     expect(snap.board[3]).toBe('EMPTY');
 
-    // Live swipe: EMPTY shows exclude as soon as painted; CAT never becomes exclude
+    // Live swipe: EMPTY→exclude; CAT unchanged; swipe back on exclude clears it
     snap = session.applyDoubleTap(5);
     expect(snap.board[5]).toBe('CAT');
     session.beginSwipeExclude();
@@ -78,7 +78,12 @@ describe('GameSession board modes (15.4 soft / strict)', () => {
     expect(snap.board[5]).toBe('CAT');
     snap = session.paintSwipeExclude(6);
     expect(snap.board[6]).toBe('EXCLUDED');
+    // Slide back onto 4 → cancel exclude
+    snap = session.paintSwipeExclude(4);
+    expect(snap.board[4]).toBe('EMPTY');
     snap = session.endSwipeExclude();
+    expect(snap.board[4]).toBe('EMPTY');
+    expect(snap.board[6]).toBe('EXCLUDED');
     expect(snap.canUndo).toBe(true);
     snap = session.undo();
     expect(snap.board[4]).toBe('EMPTY');

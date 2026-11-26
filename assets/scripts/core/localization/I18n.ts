@@ -21,7 +21,7 @@ const ZH_CN: Record<string, string> = {
   'hint.no_ticket': '提示券不足',
   'board.unsolvable': '当前标记导致无解（关卡本身有唯一解），请撤销排除或清空',
   'board.unique_ok': '本关已验证唯一解',
-  'board.tip_exclude': '单击或滑动标记排除；滑过猫格不会盖住猫；双击排除格仍可放猫',
+  'board.tip_exclude': '单击或滑动切换排除；再滑回已排除格会取消；滑过猫格不变；双击排除格可放猫',
   'conflict.row': '同一行不能有多只猫',
   'conflict.column': '同一列不能有多只猫',
   'conflict.region': '同一色区不能有多只猫',

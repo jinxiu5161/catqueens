@@ -71,7 +71,10 @@ describe('BoardInputController + hitTest (15.4)', () => {
     expect(painted).toEqual([0, 1]);
     controller.pointerMove(2, c.x, c.y, 50);
     expect(painted).toEqual([0, 1, 2]);
-    controller.pointerUp(2, c.x, c.y, 70);
+    // Swipe back onto cell 1 → paint again so session can toggle exclude off
+    controller.pointerMove(1, b.x, b.y, 60);
+    expect(painted).toEqual([0, 1, 2, 1]);
+    controller.pointerUp(1, b.x, b.y, 70);
     expect(ended).toBe(1);
     controller.dispose();
   });

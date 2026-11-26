@@ -26,7 +26,8 @@ export class BoardInputController {
   private swipeIndexes: number[] = [];
   private lastIndex = -1;
   private swipeStarted = false;
-  private painted = new Set<number>();
+  /** Last cell we forwarded to onSwipePaint — allow re-entry when sliding back. */
+  private lastPaintedIndex = -1;
 
   constructor(private readonly target: BoardInputTarget) {
     this.gesture = new GestureRecognizer((ev) => this.onGesture(ev));
@@ -41,7 +42,7 @@ export class BoardInputController {
     this.swipeIndexes = index >= 0 ? [index] : [];
     this.lastIndex = index;
     this.swipeStarted = false;
-    this.painted.clear();
+    this.lastPaintedIndex = -1;
     this.gesture.pointerDown(x, y, timeMs);
   }
 
@@ -72,13 +73,14 @@ export class BoardInputController {
     if (this.swipeStarted) return;
     this.swipeStarted = true;
     this.target.onSwipeBegin?.();
-    // Also paint cells already crossed before threshold was reached
     for (const i of this.swipeIndexes) this.paintCell(i);
   }
 
   private paintCell(index: number): void {
-    if (index < 0 || this.painted.has(index)) return;
-    this.painted.add(index);
+    if (index < 0) return;
+    // Only fire when entering a different cell (supports swipe-back toggle)
+    if (index === this.lastPaintedIndex) return;
+    this.lastPaintedIndex = index;
     this.target.onSwipePaint?.(index);
   }
 
@@ -116,11 +118,10 @@ export class BoardInputController {
       if (this.target.onSwipeEnd) {
         this.target.onSwipeEnd();
       } else if (this.target.onSwipe) {
-        // Legacy batch path when live paint is not wired
-        this.target.onSwipe([...this.painted]);
+        this.target.onSwipe([...this.swipeIndexes]);
       }
       this.swipeStarted = false;
-      this.painted.clear();
+      this.lastPaintedIndex = -1;
       this.target.onLongPressEnd();
       return;
     }
