@@ -1,0 +1,308 @@
+import { hintService } from '../core/hint/HintService';
+import type { HintResult } from '../core/hint/HintTypes';
+import type { LevelRepository } from '../core/level/LevelRepository';
+import { achievementService } from '../core/meta/AchievementService';
+import { catBookService } from '../core/meta/CatBookService';
+import { ticketService } from '../core/meta/TicketService';
+import type { BoardCommand, BoardValidation, CellState, LevelDefinition } from '../core/puzzle/PuzzleTypes';
+import { catsFromBoard, emptyBoard } from '../core/puzzle/PuzzleTypes';
+import { puzzleValidator } from '../core/puzzle/PuzzleValidator';
+import type { SaveDataV1 } from '../core/save/SaveTypes';
+import { saveService } from '../core/save/SaveService';
+
+export type SessionMode = 'soft' | 'strict';
+
+export interface SessionSnapshot {
+  level: LevelDefinition;
+  board: CellState[];
+  validation: BoardValidation;
+  canUndo: boolean;
+  canRedo: boolean;
+  mode: SessionMode;
+  tickets: number;
+  pendingTickets: number;
+  lastHint: HintResult | null;
+  won: boolean;
+  eliteFailed: boolean;
+}
+
+export type SessionListener = (snap: SessionSnapshot) => void;
+
+/**
+ * Coordinates level state, undo/redo, hints, win flow and persistence.
+ * No rendering / no `cc` imports.
+ */
+export class GameSession {
+  private level!: LevelDefinition;
+  private board: CellState[] = [];
+  private undoStack: BoardCommand[] = [];
+  private redoStack: BoardCommand[] = [];
+  private mode: SessionMode = 'soft';
+  private lastHint: HintResult | null = null;
+  private won = false;
+  private eliteFailed = false;
+  private hintsUsedThisLevel = 0;
+  private listeners = new Set<SessionListener>();
+  private save!: SaveDataV1;
+
+  constructor(private readonly levels: LevelRepository) {}
+
+  subscribe(listener: SessionListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  start(levelId: number, save?: SaveDataV1): SessionSnapshot {
+    const level = this.levels.getById(levelId);
+    if (!level) throw new Error(`Level not found: ${levelId}`);
+    this.level = level;
+    this.save = save ?? saveService.load();
+    this.save.progress.currentLevelId = levelId;
+    this.undoStack = [];
+    this.redoStack = [];
+    this.lastHint = null;
+    this.won = false;
+    this.eliteFailed = false;
+    this.hintsUsedThisLevel = 0;
+
+    // Spec: default soft; elite levels honor settings.softMode (false => strict)
+    this.mode = level.elite && !this.save.settings.softMode ? 'strict' : 'soft';
+
+    if (
+      this.save.currentRun &&
+      this.save.currentRun.levelId === levelId &&
+      this.save.currentRun.cells.length === level.size * level.size
+    ) {
+      this.board = [...this.save.currentRun.cells];
+    } else {
+      this.board = emptyBoard(level.size);
+    }
+
+    this.persistRun();
+    return this.emit();
+  }
+
+  getSnapshot(): SessionSnapshot {
+    return this.buildSnapshot();
+  }
+
+  setSoftMode(soft: boolean): SessionSnapshot {
+    this.save.settings.softMode = soft;
+    if (this.level.elite) this.mode = soft ? 'soft' : 'strict';
+    saveService.save(this.save);
+    return this.emit();
+  }
+
+  /** Apply a single-cell toggle for tap (EMPTY <-> EXCLUDED). CAT ignored. */
+  applyTap(index: number): SessionSnapshot {
+    if (this.won || !this.inBounds(index)) return this.emit();
+    const cur = this.board[index]!;
+    if (cur === 'CAT') return this.emit();
+    const next: CellState = cur === 'EMPTY' ? 'EXCLUDED' : 'EMPTY';
+    return this.applyCommand({
+      type: 'SET_CELL_STATE',
+      before: [{ index, state: cur }],
+      after: [{ index, state: next }],
+      timestamp: Date.now(),
+    });
+  }
+
+  /** Double-tap: place/remove cat. */
+  applyDoubleTap(index: number): SessionSnapshot {
+    if (this.won || !this.inBounds(index)) return this.emit();
+    const cur = this.board[index]!;
+
+    if (cur === 'CAT') {
+      return this.applyCommand({
+        type: 'REMOVE_CAT',
+        before: [{ index, state: 'CAT' }],
+        after: [{ index, state: 'EMPTY' }],
+        timestamp: Date.now(),
+      });
+    }
+
+    // EXCLUDED -> clear then place CAT (one command)
+    const beforeState = cur;
+    const afterBoard = [...this.board];
+    afterBoard[index] = 'CAT';
+    const trialCats = catsFromBoard(afterBoard);
+    const validation = puzzleValidator.validateBoard(this.level, trialCats);
+
+    if (this.mode === 'strict' && !validation.isValidSoFar) {
+      this.eliteFailed = true;
+      this.save.stats.eliteFailures += 1;
+      saveService.save(this.save);
+      return this.emit();
+    }
+
+    return this.applyCommand({
+      type: 'PLACE_CAT',
+      before: [{ index, state: beforeState }],
+      after: [{ index, state: 'CAT' }],
+      timestamp: Date.now(),
+    });
+  }
+
+  /** Swipe bulk exclude along path indexes (unique, EMPTY only). */
+  applySwipeExclude(indexes: number[]): SessionSnapshot {
+    if (this.won) return this.emit();
+    const before: BoardCommand['before'] = [];
+    const after: BoardCommand['after'] = [];
+    const seen = new Set<number>();
+    for (const index of indexes) {
+      if (!this.inBounds(index) || seen.has(index)) continue;
+      seen.add(index);
+      if (this.board[index] !== 'EMPTY') continue;
+      before.push({ index, state: 'EMPTY' });
+      after.push({ index, state: 'EXCLUDED' });
+    }
+    if (after.length === 0) return this.emit();
+    return this.applyCommand({
+      type: 'BULK_EXCLUDE',
+      before,
+      after,
+      timestamp: Date.now(),
+    });
+  }
+
+  undo(): SessionSnapshot {
+    const cmd = this.undoStack.pop();
+    if (!cmd) return this.emit();
+    this.applyStates(cmd.before);
+    this.redoStack.push(cmd);
+    this.save.stats.undos += 1;
+    this.eliteFailed = false;
+    this.persistRun();
+    return this.emit();
+  }
+
+  redo(): SessionSnapshot {
+    const cmd = this.redoStack.pop();
+    if (!cmd) return this.emit();
+    this.applyStates(cmd.after);
+    this.undoStack.push(cmd);
+    this.persistRun();
+    return this.emit();
+  }
+
+  requestHint(): { snap: SessionSnapshot; hint: HintResult; charged: boolean } {
+    const hint = hintService.getHint(this.level, this.board);
+    this.lastHint = hint;
+    let charged = false;
+    if (hint.status === 'AVAILABLE') {
+      // Spec: deduct when player confirms use of a usable hint — charge on confirmApplyHint
+      // Here we only preview.
+    }
+    return { snap: this.emit(), hint, charged };
+  }
+
+  confirmApplyHint(): SessionSnapshot {
+    if (!this.lastHint || this.lastHint.status !== 'AVAILABLE' || !this.lastHint.suggestedAction) {
+      return this.emit();
+    }
+    if (!ticketService.canUse(this.save)) return this.emit();
+    ticketService.consume(this.save);
+    this.save.stats.hintsUsed += 1;
+    this.hintsUsedThisLevel += 1;
+    const cmd = this.lastHint.suggestedAction;
+    this.lastHint = null;
+    return this.applyCommand(cmd);
+  }
+
+  clearBoard(): SessionSnapshot {
+    this.board = emptyBoard(this.level.size);
+    this.undoStack = [];
+    this.redoStack = [];
+    this.won = false;
+    this.eliteFailed = false;
+    this.lastHint = null;
+    this.persistRun();
+    return this.emit();
+  }
+
+  private applyCommand(cmd: BoardCommand): SessionSnapshot {
+    this.applyStates(cmd.after);
+    this.undoStack.push(cmd);
+    if (this.undoStack.length > 50) this.undoStack.shift();
+    this.redoStack = [];
+    this.eliteFailed = false;
+
+    const validation = puzzleValidator.validateBoard(this.level, catsFromBoard(this.board));
+    if (validation.isSolved) {
+      this.onWin();
+    }
+    this.persistRun();
+    return this.emit();
+  }
+
+  private onWin(): void {
+    this.won = true;
+    const id = this.level.id;
+    const firstClear = !this.save.progress.clearedLevelIds.includes(id);
+    if (firstClear) {
+      this.save.progress.clearedLevelIds.push(id);
+      this.save.stats.clears += 1;
+      ticketService.grantMilestoneIfNeeded(this.save, id);
+    }
+    this.save.progress.maxUnlockedLevel = Math.max(
+      this.save.progress.maxUnlockedLevel,
+      id + 1,
+      this.levels.nextId(id) ?? id,
+    );
+    if (this.hintsUsedThisLevel === 0) {
+      const c = this.save.achievements.counters.noHintClears ?? 0;
+      this.save.achievements.counters.noHintClears = c + 1;
+    }
+    catBookService.syncUnlocks(this.save);
+    achievementService.evaluate(this.save);
+    this.save.currentRun = undefined;
+    saveService.save(this.save);
+  }
+
+  private applyStates(states: Array<{ index: number; state: CellState }>): void {
+    for (const s of states) this.board[s.index] = s.state;
+  }
+
+  private persistRun(): void {
+    if (this.won) {
+      this.save.currentRun = undefined;
+    } else {
+      this.save.currentRun = {
+        levelId: this.level.id,
+        cells: [...this.board],
+        updatedAt: Date.now(),
+      };
+    }
+    saveService.save(this.save);
+  }
+
+  private inBounds(index: number): boolean {
+    return index >= 0 && index < this.level.size * this.level.size;
+  }
+
+  private buildSnapshot(): SessionSnapshot {
+    return {
+      level: this.level,
+      board: [...this.board],
+      validation: puzzleValidator.validateBoard(this.level, catsFromBoard(this.board)),
+      canUndo: this.undoStack.length > 0,
+      canRedo: this.redoStack.length > 0,
+      mode: this.mode,
+      tickets: this.save.economy.tickets,
+      pendingTickets: this.save.economy.pendingTicketRewards,
+      lastHint: this.lastHint,
+      won: this.won,
+      eliteFailed: this.eliteFailed,
+    };
+  }
+
+  private emit(): SessionSnapshot {
+    const snap = this.buildSnapshot();
+    for (const l of this.listeners) l(snap);
+    return snap;
+  }
+
+  getSave(): SaveDataV1 {
+    return this.save;
+  }
+}

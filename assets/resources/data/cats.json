@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "cats": [
+    {
+      "id": "cat_01",
+      "nameKey": "cat.cat_01.name",
+      "descriptionKey": "cat.cat_01.desc",
+      "unlockType": "LEVEL_MILESTONE",
+      "unlockValue": 1,
+      "skinIds": ["skin_basic"]
+    }
+  ]
+}

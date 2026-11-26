@@ -1,0 +1,13 @@
+library/
+temp/
+local/
+build/
+profiles/
+native/
+node_modules/
+dist/
+.DS_Store
+*.log
+.creator/
+.vscode/
+.idea/
