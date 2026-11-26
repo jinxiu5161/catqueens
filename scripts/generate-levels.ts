@@ -7,6 +7,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LevelDefinition } from '../assets/scripts/core/puzzle/PuzzleTypes';
+import { verifyAllLevels } from '../assets/scripts/core/level/LevelQuality';
 import { puzzleSolver } from '../assets/scripts/core/puzzle/PuzzleSolver';
 import { puzzleValidator } from '../assets/scripts/core/puzzle/PuzzleValidator';
 import { neighborIndexes, regionsAreFourConnected } from '../assets/scripts/core/puzzle/PuzzleRules';
@@ -261,6 +262,13 @@ function main(): void {
     if (id % 10 === 0) console.log(`generated ${id}/${count}`);
   }
 
+  // Final hard gate — refuse to write any non-unique pack
+  const quality = verifyAllLevels(levels, 4000);
+  if (quality.fail.length) {
+    console.error('Quality gate failed', quality.fail);
+    process.exit(1);
+  }
+
   const file = { schemaVersion: 1, levels };
   const jsonPath = join(ROOT, 'assets/resources/data/levels.json');
   mkdirSync(dirname(jsonPath), { recursive: true });
@@ -274,7 +282,7 @@ function main(): void {
       `/** Auto-generated starter pack. Re-run: npm run generate:levels */\n` +
       `export const STARTER_LEVELS: LevelsFile = ${JSON.stringify(file, null, 2)} as LevelsFile;\n`,
   );
-  console.log(`Wrote ${levels.length} levels`);
+  console.log(`Wrote ${levels.length} levels (all unique-verified)`);
 }
 
 main();

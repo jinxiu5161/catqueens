@@ -28,11 +28,17 @@ export class GameController extends Component {
   onLoad(): void {
     saveService.setStorage(new CocosStorageAdapter());
 
-    const reports = this.levels.load(STARTER_LEVELS);
+    const reports = this.levels.load(STARTER_LEVELS, { requireUnique: true });
     const failed = reports.filter((r) => !r.ok);
     if (failed.length) {
-      console.warn('[CatQueens] level validation failures', failed.slice(0, 10));
+      console.error(
+        `[CatQueens] ${failed.length} levels failed unique-solution gate`,
+        failed.slice(0, 10),
+      );
     }
+    console.log(
+      `[CatQueens] loaded ${this.levels.count()} uniquely-solvable levels`,
+    );
 
     this.buildUi();
     this.session = new GameSession(this.levels);
@@ -129,16 +135,13 @@ export class GameController extends Component {
 
   private onSession(snap: SessionSnapshot): void {
     this.boardView.render(snap);
-    if (snap.won) this.message = i18n.t('win.title');
-    if (snap.eliteFailed) this.message = i18n.t('fail.hint');
-    if (snap.lastHint?.status === 'AVAILABLE' && snap.validation.conflicts.length) {
-      /* keep hint message */
-    }
-    const conflictMsg =
-      !snap.won && snap.validation.conflicts[0]
-        ? i18n.t(snap.validation.conflicts[0].messageKey)
-        : this.message;
-    this.hud.render(snap, conflictMsg);
+    let msg = this.message;
+    if (snap.won) msg = i18n.t('win.title');
+    else if (snap.eliteFailed) msg = i18n.t('fail.hint');
+    else if (snap.currentStateUnsolvable) msg = i18n.t('board.unsolvable');
+    else if (snap.validation.conflicts[0]) msg = i18n.t(snap.validation.conflicts[0].messageKey);
+    this.message = msg;
+    this.hud.render(snap, msg);
   }
 
   private buildUi(): void {

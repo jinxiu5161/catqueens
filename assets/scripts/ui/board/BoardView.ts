@@ -274,10 +274,15 @@ export class BoardView extends Component {
   }
 
   private localFromTouch(e: EventTouch): { x: number; y: number } {
-    const ui = e.getUILocation();
     const transform = this.node.getComponent(UITransform)!;
+    // Prefer UI location → node local. Also clamp via world bbox for Camera canvas modes.
+    const ui = e.getUILocation();
     const local = transform.convertToNodeSpaceAR(new Vec3(ui.x, ui.y, 0));
-    return { x: local.x, y: local.y };
+    const half = this.boardSizePx / 2;
+    return {
+      x: Math.max(-half, Math.min(half - 0.001, local.x)),
+      y: Math.max(-half, Math.min(half - 0.001, local.y)),
+    };
   }
 
   private onTouchStart(e: EventTouch): void {

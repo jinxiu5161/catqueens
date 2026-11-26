@@ -6,6 +6,7 @@ import { catBookService } from '../core/meta/CatBookService';
 import { ticketService } from '../core/meta/TicketService';
 import type { BoardCommand, BoardValidation, CellState, LevelDefinition } from '../core/puzzle/PuzzleTypes';
 import { catsFromBoard, emptyBoard } from '../core/puzzle/PuzzleTypes';
+import { puzzleSolver } from '../core/puzzle/PuzzleSolver';
 import { puzzleValidator } from '../core/puzzle/PuzzleValidator';
 import type { SaveDataV1 } from '../core/save/SaveTypes';
 import { saveService } from '../core/save/SaveService';
@@ -24,6 +25,8 @@ export interface SessionSnapshot {
   lastHint: HintResult | null;
   won: boolean;
   eliteFailed: boolean;
+  /** True when CAT+EXCLUDED constraints admit zero solutions (level itself still has a unique sol). */
+  currentStateUnsolvable: boolean;
 }
 
 export type SessionListener = (snap: SessionSnapshot) => void;
@@ -74,6 +77,12 @@ export class GameSession {
       this.save.currentRun.cells.length === level.size * level.size
     ) {
       this.board = [...this.save.currentRun.cells];
+      // Bad mid-run marks (e.g. × on the only solution cell) feel like a broken level.
+      // If the restored board is already unsolvable, start clean.
+      if (this.isBoardUnsolvable(this.board)) {
+        this.board = emptyBoard(level.size);
+        this.save.currentRun = undefined;
+      }
     } else {
       this.board = emptyBoard(level.size);
     }
@@ -280,11 +289,22 @@ export class GameSession {
     return index >= 0 && index < this.level.size * this.level.size;
   }
 
+  private isBoardUnsolvable(board: CellState[]): boolean {
+    const result = puzzleSolver.solveFromBoard(this.level, board, {
+      maxSolutions: 1,
+      timeoutMs: 1200,
+    });
+    return result.status === 'ZERO';
+  }
+
   private buildSnapshot(): SessionSnapshot {
+    const validation = puzzleValidator.validateBoard(this.level, catsFromBoard(this.board));
+    const currentStateUnsolvable =
+      !this.won && !validation.isSolved && this.isBoardUnsolvable(this.board);
     return {
       level: this.level,
       board: [...this.board],
-      validation: puzzleValidator.validateBoard(this.level, catsFromBoard(this.board)),
+      validation,
       canUndo: this.undoStack.length > 0,
       canRedo: this.redoStack.length > 0,
       mode: this.mode,
@@ -293,6 +313,7 @@ export class GameSession {
       lastHint: this.lastHint,
       won: this.won,
       eliteFailed: this.eliteFailed,
+      currentStateUnsolvable,
     };
   }
 

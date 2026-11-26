@@ -1,6 +1,7 @@
 import type { LevelDefinition } from '../puzzle/PuzzleTypes';
 import { puzzleValidator } from '../puzzle/PuzzleValidator';
 import type { LevelsFile } from './LevelDefinition';
+import { verifyLevelUnique } from './LevelQuality';
 
 export interface LevelLoadReport {
   id: number;
@@ -8,12 +9,18 @@ export interface LevelLoadReport {
   errors: string[];
 }
 
+export interface LoadOptions {
+  /** When true, reject any level that is not uniquely solvable from an empty board. */
+  requireUnique?: boolean;
+  uniqueTimeoutMs?: number;
+}
+
 export class LevelRepository {
   private levels = new Map<number, LevelDefinition>();
   private order: number[] = [];
   schemaVersion = 1;
 
-  load(file: LevelsFile): LevelLoadReport[] {
+  load(file: LevelsFile, options: LoadOptions = {}): LevelLoadReport[] {
     if (file.schemaVersion !== 1) {
       throw new Error(`Unsupported levels schemaVersion: ${file.schemaVersion}`);
     }
@@ -21,6 +28,8 @@ export class LevelRepository {
     this.levels.clear();
     this.order = [];
     const reports: LevelLoadReport[] = [];
+    const requireUnique = options.requireUnique ?? true;
+    const uniqueTimeoutMs = options.uniqueTimeoutMs ?? 2500;
 
     for (const level of file.levels) {
       const result = puzzleValidator.validateLevel(level);
@@ -28,6 +37,13 @@ export class LevelRepository {
       if (result.ok && this.levels.has(level.id)) {
         report.ok = false;
         report.errors.push('E_ID_DUPLICATE');
+      }
+      if (report.ok && requireUnique) {
+        const quality = verifyLevelUnique(level, uniqueTimeoutMs);
+        if (!quality.ok) {
+          report.ok = false;
+          report.errors.push(...quality.errors);
+        }
       }
       reports.push(report);
       if (!report.ok) continue;
