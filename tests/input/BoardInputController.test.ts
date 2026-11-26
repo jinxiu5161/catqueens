@@ -44,7 +44,7 @@ describe('BoardInputController + hitTest (15.4)', () => {
     controller.dispose();
   });
 
-  it('swipe paints each cell live as the finger passes', () => {
+  it('swipe paints each cell live; release does not re-paint the path', () => {
     const painted: number[] = [];
     let began = 0;
     let ended = 0;
@@ -74,7 +74,10 @@ describe('BoardInputController + hitTest (15.4)', () => {
     // Swipe back onto cell 1 → paint again so session can toggle exclude off
     controller.pointerMove(1, b.x, b.y, 60);
     expect(painted).toEqual([0, 1, 2, 1]);
+    const paintedBeforeUp = painted.length;
     controller.pointerUp(1, b.x, b.y, 70);
+    // Finger-up on same cell must not paint again (would flip exclude back on)
+    expect(painted).toHaveLength(paintedBeforeUp);
     expect(ended).toBe(1);
     controller.dispose();
   });

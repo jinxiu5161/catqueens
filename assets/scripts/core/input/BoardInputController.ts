@@ -108,13 +108,9 @@ export class BoardInputController {
       return;
     }
     if (ev.kind === 'swipe') {
+      // Live paint already happened during move/up. Do NOT re-walk the path here —
+      // that would toggle EMPTY↔EXCLUDED a second time and undo "swipe back to clear".
       this.ensureSwipeStarted();
-      if (ev.path) {
-        for (const p of ev.path) {
-          const idx = this.target.hitTest(p.x, p.y);
-          this.paintCell(idx);
-        }
-      }
       if (this.target.onSwipeEnd) {
         this.target.onSwipeEnd();
       } else if (this.target.onSwipe) {
