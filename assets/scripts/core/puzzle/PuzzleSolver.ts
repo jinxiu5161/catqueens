@@ -183,6 +183,22 @@ export class PuzzleSolver {
     return this.solve(level, { ...options, excluded, preplaced });
   }
 
+  /**
+   * Solve using only CAT cells as fixed; EXCLUDED is ignored (player notes, may become cats).
+   * Used for wrong-place / hint solvability — excludes must not drive “无解” tips.
+   */
+  solveFromCatsOnly(
+    level: LevelDefinition,
+    board: CellState[],
+    options: SolveOptions = {},
+  ): SolveResult {
+    const preplaced: number[] = [];
+    for (let i = 0; i < board.length; i++) {
+      if (board[i] === 'CAT') preplaced.push(i);
+    }
+    return this.solve(level, { ...options, excluded: new Set<number>(), preplaced });
+  }
+
   static touches(a: number, b: number, size: number): boolean {
     return areAdjacent8(a, b, size);
   }

@@ -8,7 +8,9 @@ import type { HintResult } from './HintTypes';
  */
 export class HintService {
   getHint(level: LevelDefinition, board: CellState[]): HintResult {
-    const solve = puzzleSolver.solveFromBoard(level, board, {
+    // Ignore EXCLUDED notes — player may still flip them to cats.
+    // Only CAT placements constrain solvability for hints / wrong-place.
+    const solve = puzzleSolver.solveFromCatsOnly(level, board, {
       maxSolutions: 2,
       timeoutMs: 2500,
     });

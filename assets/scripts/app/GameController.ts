@@ -184,7 +184,6 @@ export class GameController extends Component {
     else if (snap.noStamina) msg = i18n.t('stamina.empty_title');
     else if (snap.levelFailed) msg = i18n.t('fail.title');
     else if (snap.lastWrongPlace) msg = i18n.t('heart.lost', { n: snap.hearts });
-    else if (snap.currentStateUnsolvable) msg = i18n.t('board.unsolvable');
     else if (snap.validation.conflicts[0]) msg = i18n.t(snap.validation.conflicts[0].messageKey);
     this.message = msg;
     this.hud.render(snap, msg);

@@ -31,14 +31,31 @@ describe('starter levels unique solution gate', () => {
     expect(hint.targetCells.length).toBeGreaterThan(0);
   });
 
-  it('excluding a solution cell makes current state unsolvable, not the level', () => {
+  it('excluding a solution cell makes board-with-excludes ZERO, but cats-only stays ONE', () => {
     const level = file.levels.find((l) => l.id === 1)!;
     const board = emptyBoard(level.size);
     const forced = level.solution![0]!;
     board[forced] = 'EXCLUDED';
-    const solve = puzzleSolver.solveFromBoard(level, board, { maxSolutions: 2, timeoutMs: 3000 });
-    expect(solve.status).toBe('ZERO');
+    const withExcludes = puzzleSolver.solveFromBoard(level, board, {
+      maxSolutions: 2,
+      timeoutMs: 3000,
+    });
+    expect(withExcludes.status).toBe('ZERO');
+    // Product: EXCLUDED is a soft note — gameplay / hints ignore it for solvability
+    const catsOnly = puzzleSolver.solveFromCatsOnly(level, board, {
+      maxSolutions: 2,
+      timeoutMs: 3000,
+    });
+    expect(catsOnly.status).toBe('ONE');
     const emptySolve = puzzleSolver.solve(level, { maxSolutions: 2, timeoutMs: 3000 });
     expect(emptySolve.status).toBe('ONE');
+  });
+
+  it('hint still available after excluding a solution cell (excludes ignored)', () => {
+    const level = file.levels.find((l) => l.id === 1)!;
+    const board = emptyBoard(level.size);
+    board[level.solution![0]!] = 'EXCLUDED';
+    const hint = hintService.getHint(level, board);
+    expect(hint.status).toBe('AVAILABLE');
   });
 });

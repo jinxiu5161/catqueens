@@ -28,7 +28,10 @@ export interface SessionSnapshot {
   won: boolean;
   /** @deprecated Prefer needsRevive / levelFailed / lastWrongPlace */
   eliteFailed: boolean;
-  /** True when CAT+EXCLUDED constraints admit zero solutions (level itself still has a unique sol). */
+  /**
+   * Legacy flag — always false.
+   * EXCLUDED notes must not tip “无解”; wrong cats are rejected in strict mode instead.
+   */
   currentStateUnsolvable: boolean;
   /** Remaining red hearts this attempt. */
   hearts: number;
@@ -120,7 +123,9 @@ export class GameSession {
           return this.emit();
         }
       }
-      if (this.isBoardUnsolvable(this.board)) {
+      // Excludes are soft notes — never wipe a run for exclude-based “无解”.
+      // Only reset if already-placed cats alone make the level impossible.
+      if (this.areCatsUnsolvable(this.board)) {
         this.board = emptyBoard(level.size);
         this.hearts = GameConfig.heartsPerLevel;
         this.revivesUsed = 0;
@@ -203,8 +208,11 @@ export class GameSession {
     const trialCats = catsFromBoard(afterBoard);
     const validation = puzzleValidator.validateBoard(this.level, trialCats);
 
-    if (this.mode === 'strict' && !validation.isValidSoFar) {
-      return this.penalizeWrongPlace();
+    if (this.mode === 'strict') {
+      // Rule conflict OR cats-only unsolvable (ignores EXCLUDED notes) → wrong place
+      if (!validation.isValidSoFar || this.areCatsUnsolvable(afterBoard)) {
+        return this.penalizeWrongPlace();
+      }
     }
 
     return this.applyCommand({
@@ -489,8 +497,9 @@ export class GameSession {
     return index >= 0 && index < this.level.size * this.level.size;
   }
 
-  private isBoardUnsolvable(board: CellState[]): boolean {
-    const result = puzzleSolver.solveFromBoard(this.level, board, {
+  /** True when fixed CAT cells alone admit zero solutions (EXCLUDED ignored). */
+  private areCatsUnsolvable(board: CellState[]): boolean {
+    const result = puzzleSolver.solveFromCatsOnly(this.level, board, {
       maxSolutions: 1,
       timeoutMs: 1200,
     });
@@ -499,11 +508,9 @@ export class GameSession {
 
   private buildSnapshot(): SessionSnapshot {
     const validation = puzzleValidator.validateBoard(this.level, catsFromBoard(this.board));
-    const currentStateUnsolvable =
-      !this.won &&
-      !this.levelFailed &&
-      !validation.isSolved &&
-      this.isBoardUnsolvable(this.board);
+    // Excludes are notes — never surface “当前无解” from EXCLUDED marks.
+    // Strict mode rejects unsolvable cat placements before they stick.
+    const currentStateUnsolvable = false;
     return {
       level: this.level,
       board: [...this.board],

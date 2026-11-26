@@ -14,6 +14,12 @@ const pack = JSON.parse(
   readFileSync(join(process.cwd(), 'assets/resources/data/levels.json'), 'utf8'),
 ) as LevelsFile;
 
+/** Level 1 unique solution: [1, 7, 8, 14] */
+const LEVEL = pack.levels[0]!;
+const SOLUTION = LEVEL.solution!;
+const WRONG_CELL = 0; // not in solution
+const SOLUTION_CELL = SOLUTION[0]!;
+
 function freshSession(softMode: boolean, stamina = GameConfig.staminaMax): GameSession {
   saveService.setStorage(new MemoryStorageAdapter());
   const save = createDefaultSave();
@@ -21,7 +27,7 @@ function freshSession(softMode: boolean, stamina = GameConfig.staminaMax): GameS
   save.economy.stamina = stamina;
   saveService.save(save);
   const repo = new LevelRepository();
-  const level = { ...pack.levels[0]! };
+  const level = { ...LEVEL };
   repo.load({ schemaVersion: 1, levels: [level] }, { requireUnique: true });
   const session = new GameSession(repo);
   session.start(level.id, save);
@@ -50,26 +56,54 @@ describe('GameSession board modes (strict hearts / soft / stamina)', () => {
     expect(presented.conflictedCells).toContain(1);
   });
 
-  it('strict mode rejects wrong place, deducts a heart, does not write board', () => {
+  it('strict: wrong cat (not in unique solution) deducts heart and does not write', () => {
     const session = freshSession(false);
-    let snap = session.applyDoubleTap(0);
-    expect(snap.board[0]).toBe('CAT');
-    expect(snap.hearts).toBe(GameConfig.heartsPerLevel);
-    snap = session.applyDoubleTap(1);
-    expect(snap.board[1]).toBe('EMPTY');
+    const snap = session.applyDoubleTap(WRONG_CELL);
+    expect(snap.board[WRONG_CELL]).toBe('EMPTY');
     expect(snap.lastWrongPlace).toBe(true);
     expect(snap.hearts).toBe(GameConfig.heartsPerLevel - 1);
     expect(snap.needsRevive).toBe(false);
-    expect(snap.canUndo).toBe(true);
+    expect(snap.currentStateUnsolvable).toBe(false);
+  });
+
+  it('strict: correct solution cell places without penalty', () => {
+    const session = freshSession(false);
+    const snap = session.applyDoubleTap(SOLUTION_CELL);
+    expect(snap.board[SOLUTION_CELL]).toBe('CAT');
+    expect(snap.lastWrongPlace).toBe(false);
+    expect(snap.hearts).toBe(GameConfig.heartsPerLevel);
+  });
+
+  it('strict: rule-conflict wrong place also deducts heart', () => {
+    const session = freshSession(false);
+    let snap = session.applyDoubleTap(SOLUTION_CELL);
+    expect(snap.board[SOLUTION_CELL]).toBe('CAT');
+    // Same row as SOLUTION_CELL=1 → cell 0 is same row; rule conflict
+    snap = session.applyDoubleTap(0);
+    expect(snap.board[0]).toBe('EMPTY');
+    expect(snap.lastWrongPlace).toBe(true);
+    expect(snap.hearts).toBe(GameConfig.heartsPerLevel - 1);
+  });
+
+  it('exclude marks never tip unsolvable and do not cost hearts', () => {
+    const session = freshSession(false);
+    // Exclude every solution cell — still only notes; no tip / no penalty
+    let snap = session.getSnapshot();
+    for (const idx of SOLUTION) {
+      snap = session.applyTap(idx);
+      expect(snap.board[idx]).toBe('EXCLUDED');
+    }
+    expect(snap.currentStateUnsolvable).toBe(false);
+    expect(snap.lastWrongPlace).toBe(false);
+    expect(snap.hearts).toBe(GameConfig.heartsPerLevel);
+    expect(snap.needsRevive).toBe(false);
   });
 
   it('strict: hearts deplete then needsRevive; giveUp consumes stamina', () => {
     const session = freshSession(false);
-    // Place one valid cat, then wrong placements until hearts = 0
-    session.applyDoubleTap(0);
-    let snap = session.applyDoubleTap(1); // heart 1
+    let snap = session.applyDoubleTap(WRONG_CELL); // heart 1
     expect(snap.hearts).toBe(1);
-    snap = session.applyDoubleTap(1); // heart 0 → revive
+    snap = session.applyDoubleTap(WRONG_CELL); // heart 0 → revive
     expect(snap.hearts).toBe(0);
     expect(snap.needsRevive).toBe(true);
     expect(snap.levelFailed).toBe(false);
@@ -83,9 +117,8 @@ describe('GameSession board modes (strict hearts / soft / stamina)', () => {
 
   it('strict: reviveWithAd restores hearts up to maxRevives', async () => {
     const session = freshSession(false);
-    session.applyDoubleTap(0);
-    session.applyDoubleTap(1);
-    let snap = session.applyDoubleTap(1);
+    session.applyDoubleTap(WRONG_CELL);
+    let snap = session.applyDoubleTap(WRONG_CELL);
     expect(snap.needsRevive).toBe(true);
 
     snap = await session.reviveWithAd();
@@ -93,16 +126,14 @@ describe('GameSession board modes (strict hearts / soft / stamina)', () => {
     expect(snap.hearts).toBe(GameConfig.heartsAfterRevive);
     expect(snap.revivesUsed).toBe(1);
 
-    // Burn hearts again
-    session.applyDoubleTap(1);
-    snap = session.applyDoubleTap(1);
+    session.applyDoubleTap(WRONG_CELL);
+    snap = session.applyDoubleTap(WRONG_CELL);
     expect(snap.needsRevive).toBe(true);
     snap = await session.reviveWithAd();
     expect(snap.revivesUsed).toBe(2);
 
-    // Third deplete: no revive left → fail + stamina
-    session.applyDoubleTap(1);
-    snap = session.applyDoubleTap(1);
+    session.applyDoubleTap(WRONG_CELL);
+    snap = session.applyDoubleTap(WRONG_CELL);
     expect(snap.needsRevive).toBe(false);
     expect(snap.levelFailed).toBe(true);
   });
