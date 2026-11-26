@@ -12,8 +12,17 @@ const file = JSON.parse(
 ) as LevelsFile;
 
 describe('starter levels unique solution gate', () => {
-  it('has 50 levels', () => {
-    expect(file.levels.length).toBeGreaterThanOrEqual(50);
+  it('has 500 levels (max size 10)', () => {
+    expect(file.levels.length).toBeGreaterThanOrEqual(500);
+    expect(Math.max(...file.levels.map((l) => l.size))).toBeLessThanOrEqual(10);
+  });
+
+  it('first 50 levels are no-guess for beginners', () => {
+    const first50 = file.levels.filter((l) => l.id <= 50);
+    expect(first50.length).toBe(50);
+    for (const level of first50) {
+      expect(level.noGuess, `level ${level.id} should be noGuess`).toBe(true);
+    }
   });
 
   for (const level of file.levels) {

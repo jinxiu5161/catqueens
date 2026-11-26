@@ -32,7 +32,12 @@ export class GameHUD extends Component {
 
   render(snap: SessionSnapshot, message = ''): void {
     if (this.levelLabel) {
-      this.levelLabel.string = i18n.t('hud.level', { id: snap.level.id });
+      const label = snap.level.difficultyLabel;
+      const stars = snap.level.difficulty;
+      this.levelLabel.string =
+        label && stars != null
+          ? i18n.t('hud.level_rated', { id: snap.level.id, label, stars })
+          : i18n.t('hud.level', { id: snap.level.id });
     }
     if (this.progressLabel) {
       this.progressLabel.string = i18n.t('hud.progress', {

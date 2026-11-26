@@ -2,6 +2,7 @@ const ZH_CN: Record<string, string> = {
   'app.title': '猫咪皇后',
   'app.subtitle': 'Cat Queens',
   'hud.level': '第 {id} 关',
+  'hud.level_rated': '第 {id} 关 · {label} {stars}★',
   'hud.progress': '进度 {n}/{total}',
   'hud.tickets': '提示券 {n}',
   'hud.hearts': '错误次数 {icons}',

@@ -155,6 +155,31 @@ export class PuzzleSolver {
       place(state, cell);
     }
 
+    // Singleton regions are forced cats — place before search (huge win on 8–10 boards).
+    const regionCells = new Map<number, number[]>();
+    for (let i = 0; i < level.size * level.size; i++) {
+      if (excluded.has(i)) continue;
+      const rid = level.regions[i]!;
+      const list = regionCells.get(rid) ?? [];
+      list.push(i);
+      regionCells.set(rid, list);
+    }
+    for (const [, cells] of regionCells) {
+      if (cells.length !== 1) continue;
+      const cell = cells[0]!;
+      if (state.catSet.has(cell)) continue;
+      if (!canPlace(state, cell)) {
+        return {
+          status: 'ZERO',
+          solutionCount: 0,
+          solutions: [],
+          nodes: 0,
+          elapsedMs: Date.now() - started,
+        };
+      }
+      place(state, cell);
+    }
+
     dfs(state);
     const elapsedMs = Date.now() - started;
 

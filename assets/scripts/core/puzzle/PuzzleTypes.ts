@@ -16,7 +16,12 @@ export interface LevelDefinition {
   /** Reference solution cell indexes (QA / hint only; never show in normal UI). */
   solution?: number[];
   chapterId?: number;
+  /** 1–10 star difficulty for UI. */
   difficulty?: number;
+  /** Chinese tier label, e.g. 入门 / 简单 / 普通 / 进阶 / 困难 / 专家. */
+  difficultyLabel?: string;
+  /** True when solvable by forced moves only (no guessing). */
+  noGuess?: boolean;
   elite?: boolean;
 }
 
