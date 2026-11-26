@@ -9,7 +9,6 @@ import {
   Vec3,
 } from 'cc';
 import type { SessionSnapshot } from '../../app/GameSession';
-import { neighborIndexes } from '../../core/puzzle/PuzzleRules';
 import { colOf, rowOf } from '../../core/puzzle/PuzzleTypes';
 import { BOARD_THEME, REGION_COLORS } from './BoardTheme';
 import { hitTestBoard } from './BoardHitTest';
@@ -44,9 +43,6 @@ export class BoardView extends Component {
   private pendingTapIndex = -1;
   private hintCells = new Set<number>();
   private onPointer: BoardCellHandler | null = null;
-  /** When true, ghost-mark EMPTY cells blocked by placed cats (row/col/8-adj). Notes only. */
-  @property
-  showNoteGuides = true;
 
   onLoad(): void {
     const ui = this.node.getComponent(UITransform) || this.node.addComponent(UITransform);
@@ -204,27 +200,11 @@ export class BoardView extends Component {
     if (!this.overlay || !this.snap) return;
     const g = this.overlay;
     g.clear();
-    const { level, validation, board } = this.snap;
+    const { level, validation } = this.snap;
     const size = level.size;
     const cell = this.boardSizePx / size;
     const origin = -this.boardSizePx / 2;
     const presented = presentConflicts(validation);
-
-    // Soft note guides: EMPTY cells sharing row / col / 8-adj with a placed cat.
-    // Does NOT write EXCLUDED — only helps the player mark notes manually.
-    if (this.showNoteGuides) {
-      const guide = this.collectNoteGuideCells();
-      g.fillColor = new Color(27, 42, 36, 28);
-      for (const idx of guide) {
-        if (board[idx] !== 'EMPTY') continue;
-        const r = rowOf(idx, size);
-        const c = colOf(idx, size);
-        const x = origin + c * cell;
-        const y = origin + (size - 1 - r) * cell;
-        g.rect(x + 2, y + 2, cell - 4, cell - 4);
-        g.fill();
-      }
-    }
 
     if (this.highlightIndex >= 0) {
       const hr = rowOf(this.highlightIndex, size);
@@ -275,30 +255,6 @@ export class BoardView extends Component {
       g.circle(x, y, cell * 0.38);
       g.stroke();
     }
-  }
-
-  /** EMPTY cells that share row, column, or 8-neighborhood with any CAT. */
-  private collectNoteGuideCells(): number[] {
-    if (!this.snap) return [];
-    const { board, level } = this.snap;
-    const size = level.size;
-    const cats: number[] = [];
-    for (let i = 0; i < board.length; i++) if (board[i] === 'CAT') cats.push(i);
-    if (!cats.length) return [];
-
-    const out = new Set<number>();
-    for (const cat of cats) {
-      const cr = rowOf(cat, size);
-      const cc = colOf(cat, size);
-      for (let i = 0; i < size * size; i++) {
-        if (i === cat) continue;
-        const r = rowOf(i, size);
-        const c = colOf(i, size);
-        if (r === cr || c === cc) out.add(i);
-      }
-      for (const n of neighborIndexes(cat, size)) out.add(n);
-    }
-    return [...out];
   }
 
   private localFromTouch(e: EventTouch): { x: number; y: number } {

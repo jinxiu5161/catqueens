@@ -44,13 +44,21 @@ describe('BoardInputController + hitTest (15.4)', () => {
     controller.dispose();
   });
 
-  it('swipe reports unique EMPTY path indexes', () => {
-    const swipes: number[][] = [];
+  it('swipe paints each cell live as the finger passes', () => {
+    const painted: number[] = [];
+    let began = 0;
+    let ended = 0;
     const controller = new BoardInputController({
       hitTest: (x, y) => hitTestBoard(x, y, size, boardPx),
       onTap: () => undefined,
       onDoubleTap: () => undefined,
-      onSwipe: (idx) => swipes.push(idx),
+      onSwipeBegin: () => {
+        began += 1;
+      },
+      onSwipePaint: (i) => painted.push(i),
+      onSwipeEnd: () => {
+        ended += 1;
+      },
       onLongPress: () => undefined,
       onLongPressEnd: () => undefined,
     });
@@ -59,9 +67,12 @@ describe('BoardInputController + hitTest (15.4)', () => {
     const c = cellCenterLocal(2, size, boardPx);
     controller.pointerDown(0, a.x, a.y, 0);
     controller.pointerMove(1, b.x, b.y, 30);
+    expect(began).toBe(1);
+    expect(painted).toEqual([0, 1]);
     controller.pointerMove(2, c.x, c.y, 50);
+    expect(painted).toEqual([0, 1, 2]);
     controller.pointerUp(2, c.x, c.y, 70);
-    expect(swipes[0]).toEqual([0, 1, 2]);
+    expect(ended).toBe(1);
     controller.dispose();
   });
 

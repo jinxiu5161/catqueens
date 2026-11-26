@@ -57,10 +57,17 @@ export class GameController extends Component {
         const snap = this.session.applyDoubleTap(i);
         if (snap.eliteFailed) this.message = i18n.t('fail.title');
       },
-      onSwipe: (indexes) => {
+      onSwipeBegin: () => {
         this.message = '';
         this.boardView.setPendingTap(null);
-        this.session.applySwipeExclude(indexes);
+        this.session.beginSwipeExclude();
+      },
+      onSwipePaint: (i) => {
+        // Live: EMPTY → exclude icon; CAT cells stay cats (session skips them)
+        this.session.paintSwipeExclude(i);
+      },
+      onSwipeEnd: () => {
+        this.session.endSwipeExclude();
       },
       onLongPress: (i) => this.boardView.setHighlight(i),
       onLongPressEnd: () => this.boardView.clearHighlight(),

@@ -143,6 +143,11 @@ export class GestureRecognizer {
     return this.pendingTap != null;
   }
 
+  /** True once movement exceeded swipe threshold for the current stroke. */
+  isSwiping(): boolean {
+    return this.swiping;
+  }
+
   private armPendingTap(sample: PointerSample): void {
     this.clearPendingTap();
     this.pendingTap = sample;

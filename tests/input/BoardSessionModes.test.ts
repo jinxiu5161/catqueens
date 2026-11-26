@@ -68,13 +68,22 @@ describe('GameSession board modes (15.4 soft / strict)', () => {
     snap = session.applyDoubleTap(3);
     expect(snap.board[3]).toBe('EMPTY');
 
-    // Place a cat, swipe across it and neighbors — cat stays, empty get exclude
+    // Live swipe: EMPTY shows exclude as soon as painted; CAT never becomes exclude
     snap = session.applyDoubleTap(5);
     expect(snap.board[5]).toBe('CAT');
-    snap = session.applySwipeExclude([4, 5, 6]);
+    session.beginSwipeExclude();
+    snap = session.paintSwipeExclude(4);
     expect(snap.board[4]).toBe('EXCLUDED');
+    snap = session.paintSwipeExclude(5);
     expect(snap.board[5]).toBe('CAT');
+    snap = session.paintSwipeExclude(6);
     expect(snap.board[6]).toBe('EXCLUDED');
+    snap = session.endSwipeExclude();
+    expect(snap.canUndo).toBe(true);
+    snap = session.undo();
+    expect(snap.board[4]).toBe('EMPTY');
+    expect(snap.board[5]).toBe('CAT');
+    expect(snap.board[6]).toBe('EMPTY');
   });
 
   it('UI conflict presenter does not invent conflicts beyond PuzzleCore', () => {
