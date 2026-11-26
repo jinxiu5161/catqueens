@@ -1,4 +1,4 @@
-import { GestureRecognizer, type GestureEvent } from './GestureRecognizer';
+import { GestureRecognizer, type GestureEvent, type PointerSample } from './GestureRecognizer';
 
 export interface BoardInputTarget {
   hitTest(localX: number, localY: number): number;
@@ -7,11 +7,13 @@ export interface BoardInputTarget {
   onSwipe(indexes: number[]): void;
   onLongPress(index: number): void;
   onLongPressEnd(): void;
+  /** Optional: pending first-tap cell while waiting for double-tap window. */
+  onPendingTap?(index: number | null): void;
 }
 
 /**
  * Bridges raw pointer stream → gestures → GameSession actions.
- * Keeps UI free of rule logic.
+ * Contains no puzzle rules — UI / session own all state changes.
  */
 export class BoardInputController {
   private gesture: GestureRecognizer;
@@ -20,6 +22,7 @@ export class BoardInputController {
 
   constructor(private readonly target: BoardInputTarget) {
     this.gesture = new GestureRecognizer((ev) => this.onGesture(ev));
+    this.gesture.setPendingTapListener((pending) => this.onPending(pending));
   }
 
   dispose(): void {
@@ -43,6 +46,16 @@ export class BoardInputController {
   pointerUp(index: number, x: number, y: number, timeMs: number): void {
     if (index >= 0) this.swipeIndexes.push(index);
     this.gesture.pointerUp(x, y, timeMs);
+  }
+
+  private onPending(pending: PointerSample | null): void {
+    if (!this.target.onPendingTap) return;
+    if (!pending) {
+      this.target.onPendingTap(null);
+      return;
+    }
+    const idx = this.target.hitTest(pending.x, pending.y);
+    this.target.onPendingTap(idx >= 0 ? idx : null);
   }
 
   private onGesture(ev: GestureEvent): void {
@@ -82,6 +95,10 @@ export class BoardInputController {
     if (ev.kind === 'long_press') {
       const idx = this.target.hitTest(ev.x, ev.y);
       if (idx >= 0) this.target.onLongPress(idx);
+      return;
+    }
+    if (ev.kind === 'long_press_end') {
+      this.target.onLongPressEnd();
     }
   }
 }

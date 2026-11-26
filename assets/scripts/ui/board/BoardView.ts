@@ -12,6 +12,8 @@ import {
 import type { SessionSnapshot } from '../../app/GameSession';
 import { colOf, rowOf } from '../../core/puzzle/PuzzleTypes';
 import { BOARD_THEME, REGION_COLORS } from './BoardTheme';
+import { hitTestBoard } from './BoardHitTest';
+import { presentConflicts } from './ConflictPresenter';
 
 const { ccclass, property } = _decorator;
 
@@ -39,6 +41,7 @@ export class BoardView extends Component {
   private cellLabels: Label[] = [];
   private snap: SessionSnapshot | null = null;
   private highlightIndex = -1;
+  private pendingTapIndex = -1;
   private hintCells = new Set<number>();
   private onPointer: BoardCellHandler | null = null;
 
@@ -95,6 +98,12 @@ export class BoardView extends Component {
     this.redrawOverlay();
   }
 
+  /** Light feedback while first tap waits in the double-tap window. */
+  setPendingTap(index: number | null): void {
+    this.pendingTapIndex = index == null ? -1 : index;
+    this.redrawOverlay();
+  }
+
   render(snap: SessionSnapshot): void {
     this.snap = snap;
     this.ensureLabels(snap.level.size);
@@ -105,13 +114,7 @@ export class BoardView extends Component {
 
   hitTest(localX: number, localY: number): number {
     if (!this.snap) return -1;
-    const size = this.snap.level.size;
-    const cell = this.boardSizePx / size;
-    const origin = -this.boardSizePx / 2;
-    const col = Math.floor((localX - origin) / cell);
-    const row = Math.floor((this.boardSizePx / 2 - localY) / cell);
-    if (row < 0 || col < 0 || row >= size || col >= size) return -1;
-    return row * size + col;
+    return hitTestBoard(localX, localY, this.snap.level.size, this.boardSizePx);
   }
 
   private ensureLabels(size: number): void {
@@ -200,10 +203,9 @@ export class BoardView extends Component {
     const size = level.size;
     const cell = this.boardSizePx / size;
     const origin = -this.boardSizePx / 2;
+    const presented = presentConflicts(validation);
 
-    const conflicted = new Set<number>();
-    for (const c of validation.conflicts) for (const i of c.cells) conflicted.add(i);
-
+    // Long-press: highlight row + column + region (observation only).
     if (this.highlightIndex >= 0) {
       const hr = rowOf(this.highlightIndex, size);
       const hc = colOf(this.highlightIndex, size);
@@ -221,6 +223,18 @@ export class BoardView extends Component {
       }
     }
 
+    // Pending first-tap (double-tap window) — subtle ring, no board commit yet.
+    if (this.pendingTapIndex >= 0) {
+      const r = rowOf(this.pendingTapIndex, size);
+      const c = colOf(this.pendingTapIndex, size);
+      const x = origin + c * cell;
+      const y = origin + (size - 1 - r) * cell;
+      g.strokeColor = hexColor(BOARD_THEME.accent);
+      g.lineWidth = 2;
+      g.rect(x + 6, y + 6, cell - 12, cell - 12);
+      g.stroke();
+    }
+
     for (const idx of this.hintCells) {
       const r = rowOf(idx, size);
       const c = colOf(idx, size);
@@ -232,7 +246,8 @@ export class BoardView extends Component {
       g.stroke();
     }
 
-    for (const idx of conflicted) {
+    // Derived conflicts from PuzzleCore only.
+    for (const idx of presented.conflictedCells) {
       const r = rowOf(idx, size);
       const c = colOf(idx, size);
       const x = origin + c * cell + cell / 2;

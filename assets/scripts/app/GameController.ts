@@ -48,19 +48,23 @@ export class GameController extends Component {
       hitTest: (x, y) => this.boardView.hitTest(x, y),
       onTap: (i) => {
         this.message = '';
+        this.boardView.setPendingTap(null);
         this.session.applyTap(i);
       },
       onDoubleTap: (i) => {
         this.message = '';
+        this.boardView.setPendingTap(null);
         const snap = this.session.applyDoubleTap(i);
         if (snap.eliteFailed) this.message = i18n.t('fail.title');
       },
       onSwipe: (indexes) => {
         this.message = '';
+        this.boardView.setPendingTap(null);
         this.session.applySwipeExclude(indexes);
       },
       onLongPress: (i) => this.boardView.setHighlight(i),
       onLongPressEnd: () => this.boardView.clearHighlight(),
+      onPendingTap: (i) => this.boardView.setPendingTap(i),
     });
 
     this.boardView.setPointerHandler((index, type, x, y) => {
