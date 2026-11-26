@@ -53,19 +53,27 @@ describe('GameSession board modes (15.4 soft / strict)', () => {
     expect(snap.canUndo).toBe(true); // only first place is on stack
   });
 
-  it('tap toggles ×; double-tap places/removes cat; swipe bulk excludes', () => {
+  it('tap toggles exclude icon; double-tap on exclude places cat; swipe skips cats', () => {
     const session = freshSession(true);
     let snap = session.applyTap(2);
     expect(snap.board[2]).toBe('EXCLUDED');
     snap = session.applyTap(2);
     expect(snap.board[2]).toBe('EMPTY');
+
+    // Mark exclude then double-tap → cat replaces exclude in one step
+    snap = session.applyTap(3);
+    expect(snap.board[3]).toBe('EXCLUDED');
     snap = session.applyDoubleTap(3);
     expect(snap.board[3]).toBe('CAT');
     snap = session.applyDoubleTap(3);
     expect(snap.board[3]).toBe('EMPTY');
+
+    // Place a cat, swipe across it and neighbors — cat stays, empty get exclude
+    snap = session.applyDoubleTap(5);
+    expect(snap.board[5]).toBe('CAT');
     snap = session.applySwipeExclude([4, 5, 6]);
     expect(snap.board[4]).toBe('EXCLUDED');
-    expect(snap.board[5]).toBe('EXCLUDED');
+    expect(snap.board[5]).toBe('CAT');
     expect(snap.board[6]).toBe('EXCLUDED');
   });
 

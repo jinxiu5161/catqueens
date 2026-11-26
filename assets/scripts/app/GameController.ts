@@ -98,7 +98,9 @@ export class GameController extends Component {
 
     const save = saveService.load();
     const startId = save.progress.currentLevelId || 1;
-    this.session.start(this.levels.getById(startId) ? startId : 1, save);
+    const snap = this.session.start(this.levels.getById(startId) ? startId : 1, save);
+    const hasMarks = snap.board.some((c) => c !== 'EMPTY');
+    if (!hasMarks) this.message = i18n.t('board.tip_exclude');
   }
 
   onDestroy(): void {

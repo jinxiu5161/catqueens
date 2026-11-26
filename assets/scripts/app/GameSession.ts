@@ -116,7 +116,11 @@ export class GameSession {
     });
   }
 
-  /** Double-tap: place/remove cat. */
+  /**
+   * Double-tap: place/remove cat.
+   * If the cell is EXCLUDED, clear the exclude icon and place a cat in one step
+   * so players can revise notes while hunting for the next cat.
+   */
   applyDoubleTap(index: number): SessionSnapshot {
     if (this.won || !this.inBounds(index)) return this.emit();
     const cur = this.board[index]!;
@@ -130,7 +134,7 @@ export class GameSession {
       });
     }
 
-    // EXCLUDED -> clear then place CAT (one command)
+    // EMPTY or EXCLUDED → CAT (exclude mark removed when placing)
     const beforeState = cur;
     const afterBoard = [...this.board];
     afterBoard[index] = 'CAT';
@@ -152,7 +156,11 @@ export class GameSession {
     });
   }
 
-  /** Swipe bulk exclude along path indexes (unique, EMPTY only). */
+  /**
+   * Swipe bulk-exclude: same exclude icon as single tap.
+   * CAT cells are skipped (no exclude drawn on top of a cat).
+   * Already-EXCLUDED cells are left unchanged.
+   */
   applySwipeExclude(indexes: number[]): SessionSnapshot {
     if (this.won) return this.emit();
     const before: BoardCommand['before'] = [];
@@ -161,6 +169,8 @@ export class GameSession {
     for (const index of indexes) {
       if (!this.inBounds(index) || seen.has(index)) continue;
       seen.add(index);
+      // Never overwrite a placed cat; only EMPTY → EXCLUDED
+      if (this.board[index] === 'CAT' || this.board[index] === 'EXCLUDED') continue;
       if (this.board[index] !== 'EMPTY') continue;
       before.push({ index, state: 'EMPTY' });
       after.push({ index, state: 'EXCLUDED' });

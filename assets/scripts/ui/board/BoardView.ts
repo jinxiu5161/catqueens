@@ -4,15 +4,16 @@ import {
   Component,
   EventTouch,
   Graphics,
-  Label,
   Node,
   UITransform,
   Vec3,
 } from 'cc';
 import type { SessionSnapshot } from '../../app/GameSession';
+import { neighborIndexes } from '../../core/puzzle/PuzzleRules';
 import { colOf, rowOf } from '../../core/puzzle/PuzzleTypes';
 import { BOARD_THEME, REGION_COLORS } from './BoardTheme';
 import { hitTestBoard } from './BoardHitTest';
+import { drawCatIcon, drawExcludeIcon } from './CellIcons';
 import { presentConflicts } from './ConflictPresenter';
 
 const { ccclass, property } = _decorator;
@@ -36,14 +37,16 @@ export class BoardView extends Component {
   boardSizePx = 900;
 
   private graphics: Graphics | null = null;
+  private pieces: Graphics | null = null;
   private overlay: Graphics | null = null;
-  private labelRoot: Node | null = null;
-  private cellLabels: Label[] = [];
   private snap: SessionSnapshot | null = null;
   private highlightIndex = -1;
   private pendingTapIndex = -1;
   private hintCells = new Set<number>();
   private onPointer: BoardCellHandler | null = null;
+  /** When true, ghost-mark EMPTY cells blocked by placed cats (row/col/8-adj). Notes only. */
+  @property
+  showNoteGuides = true;
 
   onLoad(): void {
     const ui = this.node.getComponent(UITransform) || this.node.addComponent(UITransform);
@@ -55,16 +58,17 @@ export class BoardView extends Component {
     this.graphics = gNode.addComponent(Graphics);
     this.node.addChild(gNode);
 
+    const pNode = new Node('BoardPieces');
+    pNode.layer = this.node.layer;
+    pNode.addComponent(UITransform).setContentSize(this.boardSizePx, this.boardSizePx);
+    this.pieces = pNode.addComponent(Graphics);
+    this.node.addChild(pNode);
+
     const oNode = new Node('BoardOverlay');
     oNode.layer = this.node.layer;
     oNode.addComponent(UITransform).setContentSize(this.boardSizePx, this.boardSizePx);
     this.overlay = oNode.addComponent(Graphics);
     this.node.addChild(oNode);
-
-    this.labelRoot = new Node('CellLabels');
-    this.labelRoot.layer = this.node.layer;
-    this.labelRoot.addComponent(UITransform).setContentSize(this.boardSizePx, this.boardSizePx);
-    this.node.addChild(this.labelRoot);
 
     this.node.on(Node.EventType.TOUCH_START, this.onTouchStart, this);
     this.node.on(Node.EventType.TOUCH_MOVE, this.onTouchMove, this);
@@ -98,7 +102,6 @@ export class BoardView extends Component {
     this.redrawOverlay();
   }
 
-  /** Light feedback while first tap waits in the double-tap window. */
   setPendingTap(index: number | null): void {
     this.pendingTapIndex = index == null ? -1 : index;
     this.redrawOverlay();
@@ -106,34 +109,14 @@ export class BoardView extends Component {
 
   render(snap: SessionSnapshot): void {
     this.snap = snap;
-    this.ensureLabels(snap.level.size);
     this.redrawBoard();
+    this.redrawPieces();
     this.redrawOverlay();
-    this.refreshLabels();
   }
 
   hitTest(localX: number, localY: number): number {
     if (!this.snap) return -1;
     return hitTestBoard(localX, localY, this.snap.level.size, this.boardSizePx);
-  }
-
-  private ensureLabels(size: number): void {
-    if (!this.labelRoot) return;
-    const need = size * size;
-    while (this.cellLabels.length < need) {
-      const n = new Node(`cell_${this.cellLabels.length}`);
-      n.layer = this.node.layer;
-      n.addComponent(UITransform).setContentSize(48, 48);
-      const label = n.addComponent(Label);
-      label.string = '';
-      label.fontSize = 28;
-      label.color = hexColor(BOARD_THEME.excluded);
-      this.labelRoot.addChild(n);
-      this.cellLabels.push(label);
-    }
-    for (let i = 0; i < this.cellLabels.length; i++) {
-      this.cellLabels[i]!.node.active = i < need;
-    }
   }
 
   private redrawBoard(): void {
@@ -195,17 +178,54 @@ export class BoardView extends Component {
     }
   }
 
+  /** Cat icon + exclude icon (same visual weight). */
+  private redrawPieces(): void {
+    if (!this.pieces || !this.snap) return;
+    const g = this.pieces;
+    g.clear();
+    const { board, level } = this.snap;
+    const size = level.size;
+    const cell = this.boardSizePx / size;
+    const origin = -this.boardSizePx / 2;
+
+    for (let i = 0; i < size * size; i++) {
+      const state = board[i];
+      if (state !== 'CAT' && state !== 'EXCLUDED') continue;
+      const r = rowOf(i, size);
+      const c = colOf(i, size);
+      const cx = origin + c * cell + cell / 2;
+      const cy = origin + (size - 1 - r) * cell + cell / 2;
+      if (state === 'CAT') drawCatIcon(g, cx, cy, cell);
+      else drawExcludeIcon(g, cx, cy, cell);
+    }
+  }
+
   private redrawOverlay(): void {
     if (!this.overlay || !this.snap) return;
     const g = this.overlay;
     g.clear();
-    const { level, validation } = this.snap;
+    const { level, validation, board } = this.snap;
     const size = level.size;
     const cell = this.boardSizePx / size;
     const origin = -this.boardSizePx / 2;
     const presented = presentConflicts(validation);
 
-    // Long-press: highlight row + column + region (observation only).
+    // Soft note guides: EMPTY cells sharing row / col / 8-adj with a placed cat.
+    // Does NOT write EXCLUDED — only helps the player mark notes manually.
+    if (this.showNoteGuides) {
+      const guide = this.collectNoteGuideCells();
+      g.fillColor = new Color(27, 42, 36, 28);
+      for (const idx of guide) {
+        if (board[idx] !== 'EMPTY') continue;
+        const r = rowOf(idx, size);
+        const c = colOf(idx, size);
+        const x = origin + c * cell;
+        const y = origin + (size - 1 - r) * cell;
+        g.rect(x + 2, y + 2, cell - 4, cell - 4);
+        g.fill();
+      }
+    }
+
     if (this.highlightIndex >= 0) {
       const hr = rowOf(this.highlightIndex, size);
       const hc = colOf(this.highlightIndex, size);
@@ -223,7 +243,6 @@ export class BoardView extends Component {
       }
     }
 
-    // Pending first-tap (double-tap window) — subtle ring, no board commit yet.
     if (this.pendingTapIndex >= 0) {
       const r = rowOf(this.pendingTapIndex, size);
       const c = colOf(this.pendingTapIndex, size);
@@ -246,7 +265,6 @@ export class BoardView extends Component {
       g.stroke();
     }
 
-    // Derived conflicts from PuzzleCore only.
     for (const idx of presented.conflictedCells) {
       const r = rowOf(idx, size);
       const c = colOf(idx, size);
@@ -254,43 +272,37 @@ export class BoardView extends Component {
       const y = origin + (size - 1 - r) * cell + cell / 2;
       g.strokeColor = hexColor(BOARD_THEME.conflict);
       g.lineWidth = 3;
-      g.circle(x, y, cell * 0.32);
+      g.circle(x, y, cell * 0.38);
       g.stroke();
     }
   }
 
-  private refreshLabels(): void {
-    if (!this.snap) return;
+  /** EMPTY cells that share row, column, or 8-neighborhood with any CAT. */
+  private collectNoteGuideCells(): number[] {
+    if (!this.snap) return [];
     const { board, level } = this.snap;
     const size = level.size;
-    const cell = this.boardSizePx / size;
-    const origin = -this.boardSizePx / 2;
-    for (let i = 0; i < size * size; i++) {
-      const label = this.cellLabels[i];
-      if (!label) continue;
-      const r = rowOf(i, size);
-      const c = colOf(i, size);
-      const x = origin + c * cell + cell / 2;
-      const y = origin + (size - 1 - r) * cell + cell / 2;
-      label.node.setPosition(new Vec3(x, y, 0));
-      const state = board[i];
-      if (state === 'CAT') {
-        label.string = '猫';
-        label.color = hexColor('#1B2A24');
-        label.fontSize = Math.max(18, Math.floor(cell * 0.35));
-      } else if (state === 'EXCLUDED') {
-        label.string = '×';
-        label.color = hexColor(BOARD_THEME.excluded);
-        label.fontSize = Math.max(18, Math.floor(cell * 0.4));
-      } else {
-        label.string = '';
+    const cats: number[] = [];
+    for (let i = 0; i < board.length; i++) if (board[i] === 'CAT') cats.push(i);
+    if (!cats.length) return [];
+
+    const out = new Set<number>();
+    for (const cat of cats) {
+      const cr = rowOf(cat, size);
+      const cc = colOf(cat, size);
+      for (let i = 0; i < size * size; i++) {
+        if (i === cat) continue;
+        const r = rowOf(i, size);
+        const c = colOf(i, size);
+        if (r === cr || c === cc) out.add(i);
       }
+      for (const n of neighborIndexes(cat, size)) out.add(n);
     }
+    return [...out];
   }
 
   private localFromTouch(e: EventTouch): { x: number; y: number } {
     const transform = this.node.getComponent(UITransform)!;
-    // Prefer UI location → node local. Also clamp via world bbox for Camera canvas modes.
     const ui = e.getUILocation();
     const local = transform.convertToNodeSpaceAR(new Vec3(ui.x, ui.y, 0));
     const half = this.boardSizePx / 2;
