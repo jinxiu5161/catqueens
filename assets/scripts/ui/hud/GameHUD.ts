@@ -16,13 +16,18 @@ export class GameHUD extends Component {
   private levelLabel: Label | null = null;
   private progressLabel: Label | null = null;
   private ticketLabel: Label | null = null;
+  private heartsLabel: Label | null = null;
+  private staminaLabel: Label | null = null;
   private messageLabel: Label | null = null;
 
   onLoad(): void {
     this.levelLabel = this.makeLabel('LevelLabel', 0, 860, 42, true);
     this.progressLabel = this.makeLabel('ProgressLabel', 0, 800, 28, false);
-    this.ticketLabel = this.makeLabel('TicketLabel', 0, 740, 28, false);
+    this.heartsLabel = this.makeLabel('HeartsLabel', 0, 750, 30, false);
+    this.staminaLabel = this.makeLabel('StaminaLabel', 0, 710, 26, false);
+    this.ticketLabel = this.makeLabel('TicketLabel', 0, 670, 26, false);
     this.messageLabel = this.makeLabel('MessageLabel', 0, -860, 26, false);
+    if (this.heartsLabel) this.heartsLabel.color = hex('#E63946');
   }
 
   render(snap: SessionSnapshot, message = ''): void {
@@ -35,12 +40,28 @@ export class GameHUD extends Component {
         total: snap.level.size,
       });
     }
+    if (this.heartsLabel) {
+      this.heartsLabel.string = this.formatHearts(snap.hearts, snap.heartsMax);
+    }
+    if (this.staminaLabel) {
+      this.staminaLabel.string = i18n.t('hud.stamina', {
+        n: snap.stamina,
+        max: snap.staminaMax,
+      });
+    }
     if (this.ticketLabel) {
       this.ticketLabel.string = i18n.t('hud.tickets', { n: snap.tickets });
     }
     if (this.messageLabel) {
       this.messageLabel.string = message;
     }
+  }
+
+  /** Filled red hearts for remaining lives; hollow for lost. */
+  private formatHearts(hearts: number, max: number): string {
+    const filled = '♥'.repeat(Math.max(0, hearts));
+    const empty = '♡'.repeat(Math.max(0, max - hearts));
+    return i18n.t('hud.hearts', { icons: filled + empty });
   }
 
   private makeLabel(name: string, x: number, y: number, fontSize: number, bold: boolean): Label {

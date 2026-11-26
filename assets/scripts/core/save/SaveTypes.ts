@@ -1,4 +1,5 @@
 import type { CellState } from '../puzzle/PuzzleTypes';
+import { GameConfig } from '../meta/GameConfig';
 
 export interface SaveDataV1 {
   schemaVersion: 1;
@@ -11,12 +12,17 @@ export interface SaveDataV1 {
     levelId: number;
     cells: CellState[];
     updatedAt: number;
+    hearts?: number;
+    revivesUsed?: number;
   };
   economy: {
     tickets: number;
     pendingTicketRewards: number;
     rewardedLevelMilestones: number[];
     rewardedAchievementIds: string[];
+    /** Current stamina (lives for starting / failing levels). */
+    stamina: number;
+    staminaMax: number;
   };
   collection: {
     unlockedCatIds: string[];
@@ -35,6 +41,7 @@ export interface SaveDataV1 {
     totalPlaySeconds: number;
   };
   settings: {
+    /** false = 严判（默认）：错放扣红心 */
     softMode: boolean;
     bgm: boolean;
     sfx: boolean;
@@ -43,7 +50,6 @@ export interface SaveDataV1 {
     language: string;
     clickPlacesCat: boolean;
   };
-  /** Ad frequency counters keyed by local calendar day YYYY-MM-DD */
   adDay?: {
     day: string;
     ticketRewarded: number;
@@ -65,6 +71,8 @@ export function createDefaultSave(): SaveDataV1 {
       pendingTicketRewards: 0,
       rewardedLevelMilestones: [],
       rewardedAchievementIds: [],
+      stamina: GameConfig.staminaMax,
+      staminaMax: GameConfig.staminaMax,
     },
     collection: {
       unlockedCatIds: ['cat_01'],
@@ -83,7 +91,8 @@ export function createDefaultSave(): SaveDataV1 {
       totalPlaySeconds: 0,
     },
     settings: {
-      softMode: true,
+      // Product update: default strict judgment
+      softMode: false,
       bgm: true,
       sfx: true,
       haptic: true,

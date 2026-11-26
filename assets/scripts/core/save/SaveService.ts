@@ -66,6 +66,9 @@ export class SaveService {
       0,
       Math.min(PENDING_TICKET_CAP, next.economy.pendingTicketRewards | 0),
     );
+    const staminaMax = Math.max(1, next.economy.staminaMax | 0);
+    next.economy.staminaMax = staminaMax;
+    next.economy.stamina = Math.max(0, Math.min(staminaMax, next.economy.stamina | 0));
     if (next.currentRun) {
       next.currentRun.cells = next.currentRun.cells.map((c) =>
         c === 'EMPTY' || c === 'EXCLUDED' || c === 'CAT' ? c : 'EMPTY',

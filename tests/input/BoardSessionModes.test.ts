@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { GameSession } from '../../assets/scripts/app/GameSession';
 import type { LevelsFile } from '../../assets/scripts/core/level/LevelDefinition';
 import { LevelRepository } from '../../assets/scripts/core/level/LevelRepository';
+import { GameConfig } from '../../assets/scripts/core/meta/GameConfig';
 import { MemoryStorageAdapter } from '../../assets/scripts/core/save/StorageAdapter';
 import { saveService } from '../../assets/scripts/core/save/SaveService';
 import { createDefaultSave } from '../../assets/scripts/core/save/SaveTypes';
@@ -13,24 +14,29 @@ const pack = JSON.parse(
   readFileSync(join(process.cwd(), 'assets/resources/data/levels.json'), 'utf8'),
 ) as LevelsFile;
 
-/** Use a known unique level and force elite so strict mode can be exercised. */
-function freshSession(softMode: boolean): GameSession {
+function freshSession(softMode: boolean, stamina = GameConfig.staminaMax): GameSession {
   saveService.setStorage(new MemoryStorageAdapter());
   const save = createDefaultSave();
   save.settings.softMode = softMode;
+  save.economy.stamina = stamina;
   saveService.save(save);
   const repo = new LevelRepository();
-  const level = { ...pack.levels[0]!, elite: true };
+  const level = { ...pack.levels[0]! };
   repo.load({ schemaVersion: 1, levels: [level] }, { requireUnique: true });
   const session = new GameSession(repo);
   session.start(level.id, save);
   return session;
 }
 
-describe('GameSession board modes (15.4 soft / strict)', () => {
+describe('GameSession board modes (strict hearts / soft / stamina)', () => {
+  it('defaults to strict and softMode=false in fresh save', () => {
+    const save = createDefaultSave();
+    expect(save.settings.softMode).toBe(false);
+    expect(save.economy.stamina).toBe(GameConfig.staminaMax);
+  });
+
   it('soft mode allows conflicting cat and exposes derived conflicts', () => {
     const session = freshSession(true);
-    // Place two cats in same row → ROW conflict
     let snap = session.applyDoubleTap(0);
     snap = session.applyDoubleTap(1);
     expect(snap.board[0]).toBe('CAT');
@@ -38,19 +44,74 @@ describe('GameSession board modes (15.4 soft / strict)', () => {
     expect(snap.validation.isValidSoFar).toBe(false);
     expect(snap.validation.conflicts.some((c) => c.type === 'ROW')).toBe(true);
     expect(snap.eliteFailed).toBe(false);
+    expect(snap.hearts).toBe(GameConfig.heartsPerLevel);
     const presented = presentConflicts(snap.validation);
     expect(presented.conflictedCells).toContain(0);
     expect(presented.conflictedCells).toContain(1);
   });
 
-  it('strict mode rejects conflicting placement and does not write board', () => {
+  it('strict mode rejects wrong place, deducts a heart, does not write board', () => {
     const session = freshSession(false);
     let snap = session.applyDoubleTap(0);
     expect(snap.board[0]).toBe('CAT');
+    expect(snap.hearts).toBe(GameConfig.heartsPerLevel);
     snap = session.applyDoubleTap(1);
     expect(snap.board[1]).toBe('EMPTY');
-    expect(snap.eliteFailed).toBe(true);
-    expect(snap.canUndo).toBe(true); // only first place is on stack
+    expect(snap.lastWrongPlace).toBe(true);
+    expect(snap.hearts).toBe(GameConfig.heartsPerLevel - 1);
+    expect(snap.needsRevive).toBe(false);
+    expect(snap.canUndo).toBe(true);
+  });
+
+  it('strict: hearts deplete then needsRevive; giveUp consumes stamina', () => {
+    const session = freshSession(false);
+    // Place one valid cat, then wrong placements until hearts = 0
+    session.applyDoubleTap(0);
+    let snap = session.applyDoubleTap(1); // heart 1
+    expect(snap.hearts).toBe(1);
+    snap = session.applyDoubleTap(1); // heart 0 → revive
+    expect(snap.hearts).toBe(0);
+    expect(snap.needsRevive).toBe(true);
+    expect(snap.levelFailed).toBe(false);
+
+    const staminaBefore = snap.stamina;
+    snap = session.giveUp();
+    expect(snap.needsRevive).toBe(false);
+    expect(snap.levelFailed).toBe(true);
+    expect(snap.stamina).toBe(staminaBefore - GameConfig.staminaCostOnFail);
+  });
+
+  it('strict: reviveWithAd restores hearts up to maxRevives', async () => {
+    const session = freshSession(false);
+    session.applyDoubleTap(0);
+    session.applyDoubleTap(1);
+    let snap = session.applyDoubleTap(1);
+    expect(snap.needsRevive).toBe(true);
+
+    snap = await session.reviveWithAd();
+    expect(snap.needsRevive).toBe(false);
+    expect(snap.hearts).toBe(GameConfig.heartsAfterRevive);
+    expect(snap.revivesUsed).toBe(1);
+
+    // Burn hearts again
+    session.applyDoubleTap(1);
+    snap = session.applyDoubleTap(1);
+    expect(snap.needsRevive).toBe(true);
+    snap = await session.reviveWithAd();
+    expect(snap.revivesUsed).toBe(2);
+
+    // Third deplete: no revive left → fail + stamina
+    session.applyDoubleTap(1);
+    snap = session.applyDoubleTap(1);
+    expect(snap.needsRevive).toBe(false);
+    expect(snap.levelFailed).toBe(true);
+  });
+
+  it('blocks start when stamina is 0', () => {
+    const session = freshSession(false, 0);
+    const snap = session.getSnapshot();
+    expect(snap.noStamina).toBe(true);
+    expect(snap.levelFailed).toBe(true);
   });
 
   it('tap toggles exclude icon; double-tap on exclude places cat; swipe skips cats', () => {
@@ -60,7 +121,6 @@ describe('GameSession board modes (15.4 soft / strict)', () => {
     snap = session.applyTap(2);
     expect(snap.board[2]).toBe('EMPTY');
 
-    // Mark exclude then double-tap → cat replaces exclude in one step
     snap = session.applyTap(3);
     expect(snap.board[3]).toBe('EXCLUDED');
     snap = session.applyDoubleTap(3);
@@ -68,7 +128,6 @@ describe('GameSession board modes (15.4 soft / strict)', () => {
     snap = session.applyDoubleTap(3);
     expect(snap.board[3]).toBe('EMPTY');
 
-    // Live swipe: EMPTY→exclude; CAT unchanged; swipe back on exclude clears it
     snap = session.applyDoubleTap(5);
     expect(snap.board[5]).toBe('CAT');
     session.beginSwipeExclude();
@@ -78,7 +137,6 @@ describe('GameSession board modes (15.4 soft / strict)', () => {
     expect(snap.board[5]).toBe('CAT');
     snap = session.paintSwipeExclude(6);
     expect(snap.board[6]).toBe('EXCLUDED');
-    // Slide back onto 4 → cancel exclude
     snap = session.paintSwipeExclude(4);
     expect(snap.board[4]).toBe('EMPTY');
     snap = session.endSwipeExclude();

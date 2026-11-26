@@ -8,6 +8,7 @@ import { BoardView } from '../ui/board/BoardView';
 import { BOARD_THEME } from '../ui/board/BoardTheme';
 import { GameHUD } from '../ui/hud/GameHUD';
 import { ActionBar } from '../ui/panels/ActionBar';
+import { FailRevivePanel } from '../ui/panels/FailRevivePanel';
 import { GameSession, type SessionSnapshot } from './GameSession';
 import { SceneRouter } from './SceneRouter';
 
@@ -21,9 +22,11 @@ export class GameController extends Component {
   private boardView!: BoardView;
   private hud!: GameHUD;
   private actionBar!: ActionBar;
+  private failPanel!: FailRevivePanel;
   private input!: BoardInputController;
   private message = '';
   private levels = new LevelRepository();
+  private reviveBusy = false;
 
   onLoad(): void {
     saveService.setStorage(new CocosStorageAdapter());
@@ -47,23 +50,24 @@ export class GameController extends Component {
     this.input = new BoardInputController({
       hitTest: (x, y) => this.boardView.hitTest(x, y),
       onTap: (i) => {
+        if (!this.session.canAcceptInput()) return;
         this.message = '';
         this.boardView.setPendingTap(null);
         this.session.applyTap(i);
       },
       onDoubleTap: (i) => {
+        if (!this.session.canAcceptInput()) return;
         this.message = '';
         this.boardView.setPendingTap(null);
-        const snap = this.session.applyDoubleTap(i);
-        if (snap.eliteFailed) this.message = i18n.t('fail.title');
+        this.session.applyDoubleTap(i);
       },
       onSwipeBegin: () => {
+        if (!this.session.canAcceptInput()) return;
         this.message = '';
         this.boardView.setPendingTap(null);
         this.session.beginSwipeExclude();
       },
       onSwipePaint: (i) => {
-        // Live: EMPTY → exclude icon; CAT cells stay cats (session skips them)
         this.session.paintSwipeExclude(i);
       },
       onSwipeEnd: () => {
@@ -103,15 +107,41 @@ export class GameController extends Component {
       },
     });
 
+    this.failPanel.setHandlers({
+      onReviveAd: () => void this.handleReviveAd(),
+      onGiveUp: () => {
+        this.message = '';
+        this.session.giveUp();
+      },
+      onRetry: () => {
+        this.message = '';
+        this.boardView.setHintCells([]);
+        this.actionBar.setApplyVisible(false);
+        this.session.retryLevel();
+      },
+    });
+
     const save = saveService.load();
     const startId = save.progress.currentLevelId || 1;
     const snap = this.session.start(this.levels.getById(startId) ? startId : 1, save);
     const hasMarks = snap.board.some((c) => c !== 'EMPTY');
-    if (!hasMarks) this.message = i18n.t('board.tip_exclude');
+    if (!hasMarks && !snap.noStamina && !snap.levelFailed) {
+      this.message = i18n.t('board.tip_exclude');
+    }
   }
 
   onDestroy(): void {
     this.input?.dispose();
+  }
+
+  private async handleReviveAd(): Promise<void> {
+    if (this.reviveBusy) return;
+    this.reviveBusy = true;
+    try {
+      await this.session.reviveWithAd();
+    } finally {
+      this.reviveBusy = false;
+    }
   }
 
   private handleHint(): void {
@@ -150,11 +180,15 @@ export class GameController extends Component {
     this.boardView.render(snap);
     let msg = this.message;
     if (snap.won) msg = i18n.t('win.title');
-    else if (snap.eliteFailed) msg = i18n.t('fail.hint');
+    else if (snap.needsRevive) msg = i18n.t('revive.title');
+    else if (snap.noStamina) msg = i18n.t('stamina.empty_title');
+    else if (snap.levelFailed) msg = i18n.t('fail.title');
+    else if (snap.lastWrongPlace) msg = i18n.t('heart.lost', { n: snap.hearts });
     else if (snap.currentStateUnsolvable) msg = i18n.t('board.unsolvable');
     else if (snap.validation.conflicts[0]) msg = i18n.t(snap.validation.conflicts[0].messageKey);
     this.message = msg;
     this.hud.render(snap, msg);
+    this.failPanel.render(snap);
   }
 
   private buildUi(): void {
@@ -163,7 +197,6 @@ export class GameController extends Component {
     const ui = root.getComponent(UITransform) || root.addComponent(UITransform);
     ui.setContentSize(visible.width, visible.height);
 
-    // background tint via empty node name only; camera clear color set in scene
     const bg = new Node('Background');
     bg.layer = root.layer;
     bg.addComponent(UITransform).setContentSize(visible.width, visible.height);
@@ -188,6 +221,11 @@ export class GameController extends Component {
     barNode.layer = root.layer;
     this.actionBar = barNode.addComponent(ActionBar);
     root.addChild(barNode);
+
+    const failNode = new Node('FailRevive');
+    failNode.layer = root.layer;
+    this.failPanel = failNode.addComponent(FailRevivePanel);
+    root.addChild(failNode);
   }
 
   /** Optional: jump menu */

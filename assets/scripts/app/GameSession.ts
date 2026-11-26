@@ -3,7 +3,9 @@ import type { HintResult } from '../core/hint/HintTypes';
 import type { LevelRepository } from '../core/level/LevelRepository';
 import { achievementService } from '../core/meta/AchievementService';
 import { catBookService } from '../core/meta/CatBookService';
+import { GameConfig } from '../core/meta/GameConfig';
 import { ticketService } from '../core/meta/TicketService';
+import { platformService } from '../core/platform/PlatformService';
 import type { BoardCommand, BoardValidation, CellState, LevelDefinition } from '../core/puzzle/PuzzleTypes';
 import { catsFromBoard, emptyBoard } from '../core/puzzle/PuzzleTypes';
 import { puzzleSolver } from '../core/puzzle/PuzzleSolver';
@@ -24,9 +26,27 @@ export interface SessionSnapshot {
   pendingTickets: number;
   lastHint: HintResult | null;
   won: boolean;
+  /** @deprecated Prefer needsRevive / levelFailed / lastWrongPlace */
   eliteFailed: boolean;
   /** True when CAT+EXCLUDED constraints admit zero solutions (level itself still has a unique sol). */
   currentStateUnsolvable: boolean;
+  /** Remaining red hearts this attempt. */
+  hearts: number;
+  heartsMax: number;
+  /** Stamina pool. */
+  stamina: number;
+  staminaMax: number;
+  /** Ad revives already used this attempt. */
+  revivesUsed: number;
+  maxRevives: number;
+  /** Hearts depleted — waiting for ad revive or give-up. */
+  needsRevive: boolean;
+  /** Attempt ended after hearts out + no revive; stamina already consumed. */
+  levelFailed: boolean;
+  /** Last action was a rejected (wrong) cat placement. */
+  lastWrongPlace: boolean;
+  /** True when start() was refused due to no stamina. */
+  noStamina: boolean;
 }
 
 export type SessionListener = (snap: SessionSnapshot) => void;
@@ -40,10 +60,16 @@ export class GameSession {
   private board: CellState[] = [];
   private undoStack: BoardCommand[] = [];
   private redoStack: BoardCommand[] = [];
-  private mode: SessionMode = 'soft';
+  private mode: SessionMode = 'strict';
   private lastHint: HintResult | null = null;
   private won = false;
   private eliteFailed = false;
+  private hearts = GameConfig.heartsPerLevel;
+  private revivesUsed = 0;
+  private needsRevive = false;
+  private levelFailed = false;
+  private lastWrongPlace = false;
+  private noStamina = false;
   private hintsUsedThisLevel = 0;
   private listeners = new Set<SessionListener>();
   private save!: SaveDataV1;
@@ -66,25 +92,55 @@ export class GameSession {
     this.lastHint = null;
     this.won = false;
     this.eliteFailed = false;
+    this.needsRevive = false;
+    this.levelFailed = false;
+    this.lastWrongPlace = false;
+    this.noStamina = false;
     this.hintsUsedThisLevel = 0;
 
-    // Spec: default soft; elite levels honor settings.softMode (false => strict)
-    this.mode = level.elite && !this.save.settings.softMode ? 'strict' : 'soft';
+    // Default strict for all levels; softMode setting opts into soft guidance.
+    this.mode = this.save.settings.softMode ? 'soft' : 'strict';
 
-    if (
-      this.save.currentRun &&
+    const restoring =
+      !!this.save.currentRun &&
       this.save.currentRun.levelId === levelId &&
-      this.save.currentRun.cells.length === level.size * level.size
-    ) {
-      this.board = [...this.save.currentRun.cells];
-      // Bad mid-run marks (e.g. × on the only solution cell) feel like a broken level.
-      // If the restored board is already unsolvable, start clean.
+      this.save.currentRun.cells.length === level.size * level.size;
+
+    if (restoring) {
+      this.board = [...this.save.currentRun!.cells];
+      this.hearts =
+        this.save.currentRun!.hearts ?? GameConfig.heartsPerLevel;
+      this.revivesUsed = this.save.currentRun!.revivesUsed ?? 0;
+      if (this.hearts <= 0) {
+        this.hearts = 0;
+        this.needsRevive = this.revivesUsed < GameConfig.maxRevivesPerLevel;
+        if (!this.needsRevive) {
+          // Already out of hearts and revives — treat as failed attempt on restore
+          this.failAttempt();
+          return this.emit();
+        }
+      }
       if (this.isBoardUnsolvable(this.board)) {
         this.board = emptyBoard(level.size);
+        this.hearts = GameConfig.heartsPerLevel;
+        this.revivesUsed = 0;
+        this.needsRevive = false;
         this.save.currentRun = undefined;
       }
     } else {
+      // Fresh attempt requires stamina
+      if (this.save.economy.stamina <= 0) {
+        this.board = emptyBoard(level.size);
+        this.hearts = 0;
+        this.revivesUsed = 0;
+        this.noStamina = true;
+        this.levelFailed = true;
+        saveService.save(this.save);
+        return this.emit();
+      }
       this.board = emptyBoard(level.size);
+      this.hearts = GameConfig.heartsPerLevel;
+      this.revivesUsed = 0;
     }
 
     this.persistRun();
@@ -97,14 +153,20 @@ export class GameSession {
 
   setSoftMode(soft: boolean): SessionSnapshot {
     this.save.settings.softMode = soft;
-    if (this.level.elite) this.mode = soft ? 'soft' : 'strict';
+    this.mode = soft ? 'soft' : 'strict';
     saveService.save(this.save);
     return this.emit();
   }
 
+  /** Input blocked during win / revive prompt / failed attempt / no stamina. */
+  canAcceptInput(): boolean {
+    return !this.won && !this.needsRevive && !this.levelFailed && !this.noStamina;
+  }
+
   /** Apply a single-cell toggle for tap (EMPTY <-> EXCLUDED). CAT ignored. */
   applyTap(index: number): SessionSnapshot {
-    if (this.won || !this.inBounds(index)) return this.emit();
+    if (!this.canAcceptInput() || !this.inBounds(index)) return this.emit();
+    this.lastWrongPlace = false;
     const cur = this.board[index]!;
     if (cur === 'CAT') return this.emit();
     const next: CellState = cur === 'EMPTY' ? 'EXCLUDED' : 'EMPTY';
@@ -118,11 +180,11 @@ export class GameSession {
 
   /**
    * Double-tap: place/remove cat.
-   * If the cell is EXCLUDED, clear the exclude icon and place a cat in one step
-   * so players can revise notes while hunting for the next cat.
+   * Strict mode: wrong placement deducts a red heart and does not write the board.
    */
   applyDoubleTap(index: number): SessionSnapshot {
-    if (this.won || !this.inBounds(index)) return this.emit();
+    if (!this.canAcceptInput() || !this.inBounds(index)) return this.emit();
+    this.lastWrongPlace = false;
     const cur = this.board[index]!;
 
     if (cur === 'CAT') {
@@ -142,10 +204,7 @@ export class GameSession {
     const validation = puzzleValidator.validateBoard(this.level, trialCats);
 
     if (this.mode === 'strict' && !validation.isValidSoFar) {
-      this.eliteFailed = true;
-      this.save.stats.eliteFailures += 1;
-      saveService.save(this.save);
-      return this.emit();
+      return this.penalizeWrongPlace();
     }
 
     return this.applyCommand({
@@ -163,6 +222,7 @@ export class GameSession {
 
   /** Start a swipe stroke (one undo command for the whole stroke). */
   beginSwipeExclude(): void {
+    if (!this.canAcceptInput()) return;
     this.swipeActive = true;
     this.swipeLastIndex = -1;
     this.swipeStartBoard = [...this.board];
@@ -173,11 +233,11 @@ export class GameSession {
    * - EMPTY → EXCLUDED
    * - EXCLUDED → EMPTY (swipe back clears exclude)
    * - CAT → unchanged
-   * Re-entering a cell in the same stroke toggles again.
    */
   paintSwipeExclude(index: number): SessionSnapshot {
-    if (this.won || !this.swipeActive || !this.inBounds(index)) return this.emit();
-    // Stay on same cell: do not flip repeatedly while finger jitters inside it
+    if (!this.canAcceptInput() || !this.swipeActive || !this.inBounds(index)) {
+      return this.emit();
+    }
     if (index === this.swipeLastIndex) return this.emit();
     this.swipeLastIndex = index;
 
@@ -188,6 +248,7 @@ export class GameSession {
     else return this.emit();
 
     this.eliteFailed = false;
+    this.lastWrongPlace = false;
     return this.emit();
   }
 
@@ -231,17 +292,20 @@ export class GameSession {
   }
 
   undo(): SessionSnapshot {
+    if (!this.canAcceptInput()) return this.emit();
     const cmd = this.undoStack.pop();
     if (!cmd) return this.emit();
     this.applyStates(cmd.before);
     this.redoStack.push(cmd);
     this.save.stats.undos += 1;
     this.eliteFailed = false;
+    this.lastWrongPlace = false;
     this.persistRun();
     return this.emit();
   }
 
   redo(): SessionSnapshot {
+    if (!this.canAcceptInput()) return this.emit();
     const cmd = this.redoStack.pop();
     if (!cmd) return this.emit();
     this.applyStates(cmd.after);
@@ -253,15 +317,11 @@ export class GameSession {
   requestHint(): { snap: SessionSnapshot; hint: HintResult; charged: boolean } {
     const hint = hintService.getHint(this.level, this.board);
     this.lastHint = hint;
-    let charged = false;
-    if (hint.status === 'AVAILABLE') {
-      // Spec: deduct when player confirms use of a usable hint — charge on confirmApplyHint
-      // Here we only preview.
-    }
-    return { snap: this.emit(), hint, charged };
+    return { snap: this.emit(), hint, charged: false };
   }
 
   confirmApplyHint(): SessionSnapshot {
+    if (!this.canAcceptInput()) return this.emit();
     if (!this.lastHint || this.lastHint.status !== 'AVAILABLE' || !this.lastHint.suggestedAction) {
       return this.emit();
     }
@@ -275,14 +335,95 @@ export class GameSession {
   }
 
   clearBoard(): SessionSnapshot {
+    if (!this.canAcceptInput()) return this.emit();
     this.board = emptyBoard(this.level.size);
     this.undoStack = [];
     this.redoStack = [];
     this.won = false;
     this.eliteFailed = false;
+    this.lastWrongPlace = false;
     this.lastHint = null;
     this.persistRun();
     return this.emit();
+  }
+
+  /** Watch rewarded ad to restore hearts (max GameConfig.maxRevivesPerLevel). */
+  async reviveWithAd(): Promise<SessionSnapshot> {
+    if (!this.needsRevive) return this.emit();
+    if (this.revivesUsed >= GameConfig.maxRevivesPerLevel) {
+      return this.giveUp();
+    }
+    const result = await platformService.showRewarded('ELITE_RETRY');
+    if (result !== 'COMPLETED') {
+      // Keep revive panel open so player can try again or give up
+      return this.emit();
+    }
+    this.revivesUsed += 1;
+    this.hearts = GameConfig.heartsAfterRevive;
+    this.needsRevive = false;
+    this.eliteFailed = false;
+    this.lastWrongPlace = false;
+    this.bumpAdDayEliteRetry();
+    this.persistRun();
+    return this.emit();
+  }
+
+  /** Decline revive: consume stamina and end the attempt. */
+  giveUp(): SessionSnapshot {
+    if (this.levelFailed) return this.emit();
+    this.needsRevive = false;
+    this.failAttempt();
+    return this.emit();
+  }
+
+  /** Retry current level after failure (requires stamina). */
+  retryLevel(): SessionSnapshot {
+    return this.start(this.level.id, this.save);
+  }
+
+  private penalizeWrongPlace(): SessionSnapshot {
+    this.lastWrongPlace = true;
+    this.eliteFailed = true;
+    this.save.stats.eliteFailures += 1;
+    this.hearts = Math.max(0, this.hearts - 1);
+
+    if (this.hearts <= 0) {
+      this.hearts = 0;
+      if (this.revivesUsed < GameConfig.maxRevivesPerLevel) {
+        this.needsRevive = true;
+        this.persistRun();
+        return this.emit();
+      }
+      // No revive left — consume stamina immediately
+      this.failAttempt();
+      return this.emit();
+    }
+
+    this.persistRun();
+    return this.emit();
+  }
+
+  private failAttempt(): void {
+    this.levelFailed = true;
+    this.needsRevive = false;
+    this.eliteFailed = true;
+    const cost = GameConfig.staminaCostOnFail;
+    this.save.economy.stamina = Math.max(0, this.save.economy.stamina - cost);
+    this.save.currentRun = undefined;
+    saveService.save(this.save);
+  }
+
+  private bumpAdDayEliteRetry(): void {
+    const day = new Date().toISOString().slice(0, 10);
+    if (!this.save.adDay || this.save.adDay.day !== day) {
+      this.save.adDay = {
+        day,
+        ticketRewarded: 0,
+        eliteRetryRewarded: 0,
+        interstitialShown: 0,
+      };
+    }
+    this.save.adDay.eliteRetryRewarded += 1;
   }
 
   private applyCommand(cmd: BoardCommand): SessionSnapshot {
@@ -291,6 +432,7 @@ export class GameSession {
     if (this.undoStack.length > 50) this.undoStack.shift();
     this.redoStack = [];
     this.eliteFailed = false;
+    this.lastWrongPlace = false;
 
     const validation = puzzleValidator.validateBoard(this.level, catsFromBoard(this.board));
     if (validation.isSolved) {
@@ -329,13 +471,15 @@ export class GameSession {
   }
 
   private persistRun(): void {
-    if (this.won) {
+    if (this.won || this.levelFailed) {
       this.save.currentRun = undefined;
     } else {
       this.save.currentRun = {
         levelId: this.level.id,
         cells: [...this.board],
         updatedAt: Date.now(),
+        hearts: this.hearts,
+        revivesUsed: this.revivesUsed,
       };
     }
     saveService.save(this.save);
@@ -356,13 +500,16 @@ export class GameSession {
   private buildSnapshot(): SessionSnapshot {
     const validation = puzzleValidator.validateBoard(this.level, catsFromBoard(this.board));
     const currentStateUnsolvable =
-      !this.won && !validation.isSolved && this.isBoardUnsolvable(this.board);
+      !this.won &&
+      !this.levelFailed &&
+      !validation.isSolved &&
+      this.isBoardUnsolvable(this.board);
     return {
       level: this.level,
       board: [...this.board],
       validation,
-      canUndo: this.undoStack.length > 0,
-      canRedo: this.redoStack.length > 0,
+      canUndo: this.undoStack.length > 0 && this.canAcceptInput(),
+      canRedo: this.redoStack.length > 0 && this.canAcceptInput(),
       mode: this.mode,
       tickets: this.save.economy.tickets,
       pendingTickets: this.save.economy.pendingTicketRewards,
@@ -370,6 +517,16 @@ export class GameSession {
       won: this.won,
       eliteFailed: this.eliteFailed,
       currentStateUnsolvable,
+      hearts: this.hearts,
+      heartsMax: GameConfig.heartsPerLevel,
+      stamina: this.save.economy.stamina,
+      staminaMax: this.save.economy.staminaMax,
+      revivesUsed: this.revivesUsed,
+      maxRevives: GameConfig.maxRevivesPerLevel,
+      needsRevive: this.needsRevive,
+      levelFailed: this.levelFailed,
+      lastWrongPlace: this.lastWrongPlace,
+      noStamina: this.noStamina,
     };
   }
 

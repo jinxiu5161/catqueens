@@ -17,7 +17,7 @@ export class SettingsController extends Component {
     this.softLabel = this.mkLabel('', 0, 80, 28);
     this.refresh();
 
-    this.mkButton('切换软引导/严判（精英关）', 0, -40, () => {
+    this.mkButton('切换软引导 / 严判', 0, -40, () => {
       const save = saveService.load();
       save.settings.softMode = !save.settings.softMode;
       saveService.save(save);
@@ -30,7 +30,9 @@ export class SettingsController extends Component {
   private refresh(): void {
     const save = saveService.load();
     if (this.softLabel) {
-      this.softLabel.string = `精英关默认：${save.settings.softMode ? '软引导' : '严判'}`;
+      this.softLabel.string = save.settings.softMode
+        ? '当前：软引导（错放不扣红心）'
+        : '当前：严判（默认，错放扣红心）';
     }
   }
 
