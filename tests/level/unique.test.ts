@@ -32,6 +32,21 @@ describe('starter levels unique solution gate', () => {
     }
   });
 
+  it('within each size stage, singleton regions never increase', async () => {
+    const { countSingletonRegions } = await import(
+      '../../assets/scripts/core/level/LevelDifficulty'
+    );
+    for (let i = 1; i < file.levels.length; i++) {
+      const a = file.levels[i - 1]!;
+      const b = file.levels[i]!;
+      if (a.size !== b.size) continue;
+      expect(
+        countSingletonRegions(b),
+        `level ${b.id} singletons rose vs ${a.id}`,
+      ).toBeLessThanOrEqual(countSingletonRegions(a));
+    }
+  });
+
   for (const level of file.levels) {
     it(`level ${level.id} is uniquely solvable from empty board`, () => {
       const report = verifyLevelUnique(level, 4000);

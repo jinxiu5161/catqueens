@@ -180,6 +180,9 @@ export function rateLevel(level: LevelDefinition): DifficultyRating {
   if (noGuessInfo.ok && noGuessInfo.steps >= size) {
     stars += Math.min(1, Math.floor(noGuessInfo.steps / (size + 2)));
   }
+  // Fewer free singleton regions → slightly higher stars within same size
+  const singles = countSingletonRegions(level);
+  if (singles <= Math.floor(size / 4)) stars = Math.min(10, stars + 1);
   stars = Math.max(1, Math.min(10, stars));
   return {
     stars,
@@ -187,4 +190,40 @@ export function rateLevel(level: LevelDefinition): DifficultyRating {
     noGuess: noGuessInfo.ok,
     forcedSteps: noGuessInfo.steps,
   };
+}
+
+/** How many regions are size-1 (instant forced cats). */
+export function countSingletonRegions(level: LevelDefinition): number {
+  const counts = new Map<number, number>();
+  for (const rid of level.regions) {
+    counts.set(rid, (counts.get(rid) ?? 0) + 1);
+  }
+  let n = 0;
+  for (const c of counts.values()) if (c === 1) n += 1;
+  return n;
+}
+
+/**
+ * Comparable hardness within the same board size.
+ * Higher = harder. Driven mainly by fewer singleton regions.
+ */
+export function levelHardness(level: LevelDefinition): number {
+  const singles = countSingletonRegions(level);
+  const counts = new Map<number, number>();
+  for (const rid of level.regions) {
+    counts.set(rid, (counts.get(rid) ?? 0) + 1);
+  }
+  const sizes = [...counts.values()];
+  const maxRegion = Math.max(...sizes);
+  const noGuess = isNoGuessLevel(level);
+  // Guessing levels are harder than no-guess at same singleton count
+  const guessBoost = noGuess.ok ? 0 : 50_000;
+  // Weight max-region lightly so progression is mostly singleton-driven
+  // and equal-singleton levels stay feasible to generate.
+  return (
+    guessBoost +
+    (level.size - singles) * 10_000 +
+    maxRegion * 10 +
+    noGuess.steps
+  );
 }

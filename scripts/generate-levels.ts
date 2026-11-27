@@ -8,12 +8,16 @@
  * - Levels 1–50 must be no-guess (deterministic forced moves only)
  * - Every level unique-solvable + difficulty stars/tier
  */
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LevelDefinition } from '../assets/scripts/core/puzzle/PuzzleTypes';
 import { verifyAllLevels } from '../assets/scripts/core/level/LevelQuality';
-import { isNoGuessLevel, rateLevel } from '../assets/scripts/core/level/LevelDifficulty';
+import {
+  countSingletonRegions,
+  levelHardness,
+  rateLevel,
+} from '../assets/scripts/core/level/LevelDifficulty';
 import { puzzleSolver } from '../assets/scripts/core/puzzle/PuzzleSolver';
 import { puzzleValidator } from '../assets/scripts/core/puzzle/PuzzleValidator';
 import { neighborIndexes, regionsAreFourConnected } from '../assets/scripts/core/puzzle/PuzzleRules';
@@ -257,9 +261,9 @@ function repairConnectivity(
 function solveTimeoutMs(size: number): number {
   if (size <= 6) return 800;
   if (size <= 7) return 1200;
-  if (size <= 8) return 1800;
-  if (size <= 9) return 2500;
-  return 3500;
+  if (size <= 8) return 1600;
+  if (size <= 9) return 2000;
+  return 2200; // fail fast; outer retries vary the seed instead
 }
 
 function regionCandidatesForCell(
@@ -368,37 +372,67 @@ function requireNoGuess(id: number): boolean {
   return id <= 40;
 }
 
-function singletonTargetFor(id: number, size: number): number {
-  if (id === 1) return size; // 引导：几乎全是单格区
-  if (id === 2) return Math.max(2, size - 1);
-  if (id <= 7) return Math.max(1, Math.floor(size / 2)); // 4×4 练习，稍少白送
-  if (id <= 22) return Math.max(1, Math.floor(size / 2));
-  if (id <= 40) return Math.max(1, Math.floor(size / 3));
-  if (id <= 100) return Math.max(0, Math.floor(size / 4));
-  if (size >= 10) return Math.max(3, Math.floor(size / 2));
-  if (size >= 9) return Math.max(2, Math.floor(size / 3));
-  if (size >= 8) return Math.max(1, Math.floor(size / 4));
-  return 0;
+/** Inclusive id range for a board-size stage. */
+function stageRangeForSize(size: number): { start: number; end: number } {
+  const ranges: Record<number, { start: number; end: number }> = {
+    4: { start: 1, end: 7 },
+    5: { start: 8, end: 22 },
+    6: { start: 23, end: 70 },
+    7: { start: 71, end: 160 },
+    8: { start: 161, end: 300 },
+    9: { start: 301, end: 420 },
+    10: { start: 421, end: 500 },
+  };
+  return ranges[size] ?? { start: 1, end: 500 };
 }
 
-function generateOne(id: number, seed: number): LevelDefinition | null {
+/**
+ * Within each size stage, singleton target decreases from high → low as id grows.
+ */
+function singletonTargetFor(id: number, size: number): number {
+  const { start, end } = stageRangeForSize(size);
+  const span = Math.max(1, end - start);
+  const t = Math.min(1, Math.max(0, (id - start) / span));
+  // Stage start: many freebies; stage end: fewer — never force S=0 on large boards
+  // (0-singleton unique packs are extremely slow above 7×7).
+  const maxS = size <= 5 ? size : Math.max(3, Math.floor(size * 0.65));
+  const minS = singletonFloor(size);
+  return Math.max(minS, Math.round(maxS - t * (maxS - minS)));
+}
+
+function singletonFloor(size: number): number {
+  if (size <= 5) return 1;
+  if (size <= 7) return 1;
+  if (size <= 8) return 2;
+  if (size <= 9) return 3;
+  return 4; // 10×10: keep enough singletons for tractable uniqueness
+}
+
+function generateOne(
+  id: number,
+  seed: number,
+  opts: { maxSingletons: number },
+): LevelDefinition | null {
   const size = sizeForLevel(id);
   const rand = mulberry32(seed);
   const needNoGuess = requireNoGuess(id);
-  const singles = singletonTargetFor(id, size);
-  const innerAttempts = size >= 9 ? 50 : size >= 7 ? 70 : 90;
+  const singles = opts.maxSingletons; // caller already applied schedule + smooth drop
+  const innerAttempts = size >= 9 ? 60 : size >= 7 ? 90 : 120;
 
   for (let attempt = 0; attempt < innerAttempts; attempt++) {
     const solution = placeSolution(size, rand);
     if (!solution) continue;
 
+    // Prefer exact singleton budget; also try one fewer (harder), never more
     const strategies: Array<() => number[] | null> = [];
-    if (singles > 0) {
-      strategies.push(() => easyRegions(size, solution, rand, singles));
-      strategies.push(() => easyRegions(size, solution, rand, Math.max(0, singles - 1)));
+    const floor = singletonFloor(size);
+    strategies.push(() => easyRegions(size, solution, rand, singles));
+    if (singles > floor) {
+      strategies.push(() => easyRegions(size, solution, rand, Math.max(floor, singles - 1)));
     }
-    strategies.push(() => voronoiRegions(size, solution, rand));
-    strategies.push(() => easyRegions(size, solution, rand, Math.max(1, Math.floor(size / 2))));
+    if (singles <= floor + 1) {
+      strategies.push(() => voronoiRegions(size, solution, rand));
+    }
 
     const pick = strategies[attempt % strategies.length]!;
     let regions = pick();
@@ -422,6 +456,13 @@ function generateOne(id: number, seed: number): LevelDefinition | null {
 
     const rating = rateLevel(level);
     if (needNoGuess && !rating.noGuess) continue;
+
+    const gotSingles = countSingletonRegions(level);
+    // Easier = more singletons than allowed → discard
+    if (gotSingles > singles) continue;
+    if (gotSingles < floor) continue;
+    // Smooth descent: at most one singleton step below this level's target
+    if (gotSingles < singles - 1) continue;
 
     // Early 4×4 stay 入门; guided tips only on 1–2 in UI
     if (id <= 7) {
@@ -458,26 +499,75 @@ function main(): void {
   const count = Number(process.env.LEVEL_COUNT ?? 500);
   const startId = Number(process.env.LEVEL_START ?? 1);
   const levels: LevelDefinition[] = [];
-  let seed = 20261126 + startId * 997;
+  let seed = 20261126 + startId * 9973;
   const t0 = Date.now();
 
+  // Resume: keep levels before startId from existing pack when present
+  const jsonPath = join(ROOT, 'assets/resources/data/levels.json');
+  if (startId > 1 && existsSync(jsonPath)) {
+    try {
+      const prev = JSON.parse(readFileSync(jsonPath, 'utf8')) as {
+        levels: LevelDefinition[];
+      };
+      for (const l of prev.levels) {
+        if (l.id < startId) levels.push(l);
+      }
+      levels.sort((a, b) => a.id - b.id);
+      console.log(`resuming from ${startId}, kept ${levels.length} prior levels`);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  let prevSize = -1;
+  let prevSingletons = Number.POSITIVE_INFINITY;
+  if (levels.length) {
+    const last = levels[levels.length - 1]!;
+    prevSize = last.size;
+    prevSingletons = countSingletonRegions(last);
+  }
+
   for (let id = startId; id <= count; id++) {
+    const size = sizeForLevel(id);
+    if (size !== prevSize) {
+      // New size stage: reset (onboarding freeness allowed again)
+      prevSingletons = Number.POSITIVE_INFINITY;
+      prevSize = size;
+    }
+
     let level: LevelDefinition | null = null;
-    const maxRetry = requireNoGuess(id) ? 250 : sizeForLevel(id) >= 7 ? 220 : 120;
+    // Follow schedule, never rise vs previous, drop by at most 1 per level
+    const scheduled = singletonTargetFor(id, size);
+    const target =
+      prevSingletons === Number.POSITIVE_INFINITY
+        ? scheduled
+        : Math.min(prevSingletons, Math.max(scheduled, prevSingletons - 1));
+    const maxRetry = requireNoGuess(id) ? 500 : size >= 7 ? 360 : 260;
     for (let retry = 0; retry < maxRetry && !level; retry++) {
-      level = generateOne(id, seed++);
+      // Late retries: hold singleton count if a drop is hard to find
+      const tryTarget =
+        retry > maxRetry * 0.6 && prevSingletons < Number.POSITIVE_INFINITY
+          ? Math.min(prevSingletons, target + 1)
+          : target;
+      level = generateOne(id, seed++, {
+        maxSingletons: Math.min(tryTarget, prevSingletons),
+      });
     }
     if (!level) {
-      console.error(`Failed to generate level ${id} (size=${sizeForLevel(id)})`);
+      console.error(
+        `Failed to generate level ${id} (size=${size}, prevS=${prevSingletons}, target=${target})`,
+      );
       process.exit(1);
     }
+    const singles = countSingletonRegions(level);
+    const hard = levelHardness(level);
+    prevSingletons = singles;
     levels.push(level);
     if (id % 25 === 0 || id === count) {
       const ng = levels.filter((l) => l.noGuess).length;
       console.log(
-        `generated ${id}/${count} · batchNoGuess=${ng} · last=${level.size}x${level.size} ${level.difficultyLabel}${level.difficulty} · ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+        `generated ${id}/${count} · batchNoGuess=${ng} · last=${level.size}x${level.size} S${singles} H${hard} ${level.difficultyLabel}${level.difficulty} · ${((Date.now() - t0) / 1000).toFixed(1)}s`,
       );
-      // Checkpoint so long runs are not lost
       if (startId === 1) writePack(levels);
     }
   }
@@ -510,6 +600,19 @@ function main(): void {
         badEasy.map((l) => l.id),
       );
       process.exit(1);
+    }
+
+    // Within each size stage: singletons never increase (not easier by freebies)
+    for (let i = 1; i < levels.length; i++) {
+      const a = levels[i - 1]!;
+      const b = levels[i]!;
+      if (a.size !== b.size) continue;
+      const sa = countSingletonRegions(a);
+      const sb = countSingletonRegions(b);
+      if (sb > sa) {
+        console.error(`Singleton increased within stage at level ${b.id}: ${sa} → ${sb}`);
+        process.exit(1);
+      }
     }
   }
 
