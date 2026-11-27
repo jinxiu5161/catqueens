@@ -42,6 +42,10 @@ export class BoardView extends Component {
   private highlightIndex = -1;
   private pendingTapIndex = -1;
   private hintCells = new Set<number>();
+  private coachFocus = new Set<number>();
+  private coachTargets = new Set<number>();
+  private coachPointer = -1;
+  private coachPulse = 0;
   private onPointer: BoardCellHandler | null = null;
 
   onLoad(): void {
@@ -100,6 +104,31 @@ export class BoardView extends Component {
 
   setPendingTap(index: number | null): void {
     this.pendingTapIndex = index == null ? -1 : index;
+    this.redrawOverlay();
+  }
+
+  /**
+   * Interactive technique coach: dim non-focus cells, glow targets, point at pointer.
+   * Pass null to clear.
+   */
+  setCoachSpotlight(
+    opts: { focus: number[]; targets: number[]; pointer: number } | null,
+  ): void {
+    if (!opts) {
+      this.coachFocus = new Set();
+      this.coachTargets = new Set();
+      this.coachPointer = -1;
+    } else {
+      this.coachFocus = new Set(opts.focus);
+      this.coachTargets = new Set(opts.targets);
+      this.coachPointer = opts.pointer;
+    }
+    this.redrawOverlay();
+  }
+
+  update(dt: number): void {
+    if (this.coachPointer < 0) return;
+    this.coachPulse = (this.coachPulse + dt) % 1.2;
     this.redrawOverlay();
   }
 
@@ -206,6 +235,38 @@ export class BoardView extends Component {
     const origin = -this.boardSizePx / 2;
     const presented = presentConflicts(validation);
 
+    if (this.coachFocus.size > 0) {
+      // Dim cells outside the teach focus so the line/region stands out.
+      g.fillColor = hexColor('rgba(12,18,16,0.62)');
+      for (let i = 0; i < size * size; i++) {
+        if (this.coachFocus.has(i)) continue;
+        const r = rowOf(i, size);
+        const c = colOf(i, size);
+        const x = origin + c * cell;
+        const y = origin + (size - 1 - r) * cell;
+        g.rect(x, y, cell, cell);
+        g.fill();
+      }
+
+      for (const idx of this.coachTargets) {
+        const r = rowOf(idx, size);
+        const c = colOf(idx, size);
+        const x = origin + c * cell;
+        const y = origin + (size - 1 - r) * cell;
+        g.strokeColor = hexColor(BOARD_THEME.hint);
+        g.lineWidth = 5;
+        g.rect(x + 3, y + 3, cell - 6, cell - 6);
+        g.stroke();
+        g.fillColor = hexColor('rgba(244,211,94,0.22)');
+        g.rect(x + 3, y + 3, cell - 6, cell - 6);
+        g.fill();
+      }
+
+      if (this.coachPointer >= 0) {
+        this.drawCoachHand(g, this.coachPointer, size, cell, origin);
+      }
+    }
+
     if (this.highlightIndex >= 0) {
       const hr = rowOf(this.highlightIndex, size);
       const hc = colOf(this.highlightIndex, size);
@@ -255,6 +316,49 @@ export class BoardView extends Component {
       g.circle(x, y, cell * 0.38);
       g.stroke();
     }
+  }
+
+  /** Simple white glove + ripple so the player knows where to tap. */
+  private drawCoachHand(
+    g: Graphics,
+    index: number,
+    size: number,
+    cell: number,
+    origin: number,
+  ): void {
+    const r = rowOf(index, size);
+    const c = colOf(index, size);
+    const cx = origin + c * cell + cell * 0.62;
+    const cy = origin + (size - 1 - r) * cell + cell * 0.28;
+    const pulse = 0.85 + 0.15 * Math.sin((this.coachPulse / 1.2) * Math.PI * 2);
+    const rad = cell * 0.22 * pulse;
+
+    g.strokeColor = hexColor('rgba(255,255,255,0.75)');
+    g.lineWidth = 2;
+    g.circle(cx, cy, rad * 1.35);
+    g.stroke();
+    g.circle(cx, cy, rad * 0.85);
+    g.stroke();
+
+    // Glove palm
+    g.fillColor = hexColor('#FFFFFF');
+    g.circle(cx, cy - cell * 0.02, cell * 0.16);
+    g.fill();
+    // Fingers
+    for (let i = -1; i <= 1; i++) {
+      g.fillColor = hexColor('#FFFFFF');
+      g.roundRect(
+        cx + i * cell * 0.09 - cell * 0.04,
+        cy + cell * 0.08,
+        cell * 0.08,
+        cell * 0.18,
+        4,
+      );
+      g.fill();
+    }
+    // Thumb
+    g.roundRect(cx - cell * 0.22, cy - cell * 0.04, cell * 0.14, cell * 0.08, 4);
+    g.fill();
   }
 
   private localFromTouch(e: EventTouch): { x: number; y: number } {

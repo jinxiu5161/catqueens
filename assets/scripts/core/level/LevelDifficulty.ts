@@ -118,6 +118,18 @@ function placeCat(
   for (const n of neighborIndexes(index, size)) blocked[n] = true;
 }
 
+/** First singleton-forced cat on an empty board, or null if none. */
+export function firstForcedPlacement(level: LevelDefinition): number | null {
+  const size = level.size;
+  const blocked = Array.from({ length: size * size }, () => false);
+  const cats: number[] = [];
+  const catSet = new Set<number>();
+  const forced = findForced(level, blocked, cats, catSet);
+  if (forced.length === 0) return null;
+  forced.sort((a, b) => a - b);
+  return forced[0]!;
+}
+
 /**
  * True when the unique solution can be reached by repeatedly placing
  * singleton-forced cats (row / col / region). No branching = 不需要猜想.

@@ -330,7 +330,7 @@ export function curriculumFor(id: number): Lesson {
 }
 
 /**
- * First level that introduces each technique (show onboarding modal).
+ * First level that introduces each technique (interactive board coach).
  * T0 uses tutorial.1 / tutorial.2 instead.
  */
 export const TECHNIQUE_GUIDE_LEVEL: Partial<Record<TechniqueId, number>> = {

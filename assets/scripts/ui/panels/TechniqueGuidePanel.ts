@@ -1,17 +1,16 @@
 import {
   _decorator,
-  Button,
   Color,
   Component,
+  Graphics,
   Label,
   Node,
   UITransform,
-  Graphics,
+  view,
 } from 'cc';
 import { i18n } from '../../core/localization/I18n';
-import type { TechniqueId } from '../../core/level/LevelTechniques';
-import { TECHNIQUE_LABELS } from '../../core/level/LevelTechniques';
-import { BOARD_THEME } from '../board/BoardTheme';
+import type { CoachStep } from '../../core/level/TechniqueCoach';
+import { BOARD_THEME, REGION_COLORS } from '../board/BoardTheme';
 
 const { ccclass } = _decorator;
 
@@ -21,61 +20,89 @@ function hex(c: string): Color {
   return out;
 }
 
+/**
+ * Speech-bubble coach above the board (reference-style).
+ * Board spotlight / hand pointer live on BoardView; this only shows the tip text.
+ */
 @ccclass('TechniqueGuidePanel')
 export class TechniqueGuidePanel extends Component {
   private root: Node | null = null;
-  private titleLabel: Label | null = null;
+  private chipGfx: Graphics | null = null;
   private bodyLabel: Label | null = null;
-  private onDismiss: (() => void) | null = null;
 
   onLoad(): void {
-    this.root = new Node('TechniqueGuideRoot');
+    const visible = view.getVisibleSize();
+    this.root = new Node('CoachRoot');
     this.root.layer = this.node.layer;
-    this.root.addComponent(UITransform).setContentSize(640, 360);
-    this.root.setPosition(0, 60, 0);
+    this.root.addComponent(UITransform).setContentSize(visible.width, visible.height);
     this.node.addChild(this.root);
 
-    const bg = new Node('Bg');
+    const bubble = new Node('Bubble');
+    bubble.layer = this.node.layer;
+    bubble.addComponent(UITransform).setContentSize(580, 150);
+    bubble.setPosition(0, 420, 0);
+    this.root.addChild(bubble);
+
+    const bg = new Node('BubbleBg');
     bg.layer = this.node.layer;
-    bg.addComponent(UITransform).setContentSize(640, 360);
+    bg.addComponent(UITransform).setContentSize(580, 150);
     const g = bg.addComponent(Graphics);
-    g.fillColor = hex('#24352E');
-    g.roundRect(-320, -180, 640, 360, 24);
+    g.fillColor = hex('#FFFDF8');
+    g.roundRect(-290, -75, 580, 150, 18);
     g.fill();
-    g.strokeColor = hex(BOARD_THEME.boardFrame);
+    g.strokeColor = hex('#8B6914');
     g.lineWidth = 3;
-    g.roundRect(-320, -180, 640, 360, 24);
+    g.roundRect(-290, -75, 580, 150, 18);
     g.stroke();
-    this.root.addChild(bg);
+    g.fillColor = hex('#FFFDF8');
+    g.moveTo(-18, -75);
+    g.lineTo(0, -98);
+    g.lineTo(18, -75);
+    g.close();
+    g.fill();
+    bubble.addChild(bg);
 
-    this.titleLabel = this.mkLabel(this.root, 'Title', 0, 110, 34, true);
-    this.bodyLabel = this.mkLabel(this.root, 'Body', 0, 10, 24, false);
-    if (this.bodyLabel) {
-      const ui = this.bodyLabel.node.getComponent(UITransform)!;
-      ui.setContentSize(560, 160);
-      this.bodyLabel.overflow = Label.Overflow.RESIZE_HEIGHT;
-      this.bodyLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
-      this.bodyLabel.verticalAlign = Label.VerticalAlign.CENTER;
-    }
+    const chipNode = new Node('RegionChip');
+    chipNode.layer = this.node.layer;
+    chipNode.addComponent(UITransform).setContentSize(36, 36);
+    chipNode.setPosition(-240, 8, 0);
+    this.chipGfx = chipNode.addComponent(Graphics);
+    bubble.addChild(chipNode);
 
-    this.mkButton(this.root, 'Ok', 0, -120, () => {
-      this.hide();
-      this.onDismiss?.();
-    });
+    const textNode = new Node('Body');
+    textNode.layer = this.node.layer;
+    textNode.addComponent(UITransform).setContentSize(460, 120);
+    textNode.setPosition(30, 4, 0);
+    this.bodyLabel = textNode.addComponent(Label);
+    this.bodyLabel.fontSize = 24;
+    this.bodyLabel.lineHeight = 34;
+    this.bodyLabel.overflow = Label.Overflow.RESIZE_HEIGHT;
+    this.bodyLabel.horizontalAlign = Label.HorizontalAlign.LEFT;
+    this.bodyLabel.verticalAlign = Label.VerticalAlign.CENTER;
+    this.bodyLabel.color = hex('#3A2F22');
+    bubble.addChild(textNode);
 
     this.root.active = false;
   }
 
-  /** Show guide for a technique; returns true if shown. */
-  show(tech: TechniqueId, onDismiss?: () => void): void {
-    if (!this.root) return;
-    this.onDismiss = onDismiss ?? null;
-    if (this.titleLabel) {
-      this.titleLabel.string = i18n.t('technique.guide_title', {
-        name: TECHNIQUE_LABELS[tech],
-      });
-    }
-    if (this.bodyLabel) this.bodyLabel.string = i18n.t(`technique.${tech}`);
+  show(step: CoachStep): void {
+    if (!this.root || !this.bodyLabel || !this.chipGfx) return;
+    const color =
+      step.regionId != null
+        ? REGION_COLORS[step.regionId % REGION_COLORS.length]!
+        : BOARD_THEME.accent;
+
+    this.chipGfx.clear();
+    this.chipGfx.fillColor = hex(color);
+    this.chipGfx.roundRect(-18, -18, 36, 36, 5);
+    this.chipGfx.fill();
+    this.chipGfx.strokeColor = hex('#5A4630');
+    this.chipGfx.lineWidth = 2;
+    this.chipGfx.roundRect(-18, -18, 36, 36, 5);
+    this.chipGfx.stroke();
+
+    // Strip {region} placeholder — chip stands in for the region color.
+    this.bodyLabel.string = i18n.t(step.messageKey).replace(/\{region\}/g, '');
     this.root.active = true;
   }
 
@@ -85,56 +112,5 @@ export class TechniqueGuidePanel extends Component {
 
   isVisible(): boolean {
     return !!this.root?.active;
-  }
-
-  private mkLabel(
-    parent: Node,
-    name: string,
-    x: number,
-    y: number,
-    size: number,
-    bold: boolean,
-  ): Label {
-    const n = new Node(name);
-    n.layer = parent.layer;
-    n.setPosition(x, y, 0);
-    n.addComponent(UITransform).setContentSize(560, 48);
-    parent.addChild(n);
-    const label = n.addComponent(Label);
-    label.fontSize = size;
-    label.lineHeight = size + 8;
-    label.color = hex(bold ? '#FFE8A3' : '#F5F0E8');
-    label.horizontalAlign = Label.HorizontalAlign.CENTER;
-    label.verticalAlign = Label.VerticalAlign.CENTER;
-    label.string = '';
-    return label;
-  }
-
-  private mkButton(parent: Node, name: string, x: number, y: number, onClick: () => void): Node {
-    const n = new Node(name);
-    n.layer = parent.layer;
-    n.setPosition(x, y, 0);
-    n.addComponent(UITransform).setContentSize(280, 72);
-    parent.addChild(n);
-
-    const g = n.addComponent(Graphics);
-    g.fillColor = hex(BOARD_THEME.accent);
-    g.roundRect(-140, -36, 280, 72, 16);
-    g.fill();
-
-    const labelNode = new Node('Label');
-    labelNode.layer = n.layer;
-    labelNode.addComponent(UITransform).setContentSize(260, 60);
-    n.addChild(labelNode);
-    const label = labelNode.addComponent(Label);
-    label.string = i18n.t('technique.ok');
-    label.fontSize = 28;
-    label.horizontalAlign = Label.HorizontalAlign.CENTER;
-    label.verticalAlign = Label.VerticalAlign.CENTER;
-    label.color = hex('#2A2438');
-
-    const btn = n.addComponent(Button);
-    btn.node.on(Button.EventType.CLICK, onClick, this);
-    return n;
   }
 }

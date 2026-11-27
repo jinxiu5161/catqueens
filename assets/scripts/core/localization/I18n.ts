@@ -50,6 +50,17 @@ const ZH_CN: Record<string, string> = {
     '注意只剩两格的色区：它们常和「某行只剩两个候选」联动，互相卡住后可以排除矛盾一侧。',
   'technique.T6':
     '当没有强制落点时，可对某个二选一格试放一步：若立刻矛盾就叉掉它，再换另一侧。',
+  // Interactive board coach (bubble); {region} → color chip beside text
+  'coach.T1_row': '由于{region}中一定有一只小猫，所以这一行其他格子可以先划掉排除',
+  'coach.T1_col': '由于{region}中一定有一只小猫，所以这一列其他格子可以先划掉排除',
+  'coach.T2_row': '这两个色区挤在两行里，行上不属于它们的格子可以先排除',
+  'coach.T2_col': '这两个色区挤在两列里，列上不属于它们的格子可以先排除',
+  'coach.T3_place': '这里只剩一格能放——双击放上小猫，再叉掉同行同列和周围',
+  'coach.T4_row': '多个色区挤进同样多的行时，行上无关格子可以整行排除',
+  'coach.T4_col': '多个色区挤进同样多的列时，列上无关格子可以整列排除',
+  'coach.T5': '两格色区只剩一侧合理——先把矛盾的那一格划掉',
+  'coach.T6_place': '没有强制落点时，先试放这一格；若立刻矛盾就换另一侧',
+  'coach.T6_exclude': '试推后矛盾的一侧可以先划掉，再看另一侧',
   'conflict.row': '同一行不能有多只猫',
   'conflict.column': '同一列不能有多只猫',
   'conflict.region': '同一色区不能有多只猫',

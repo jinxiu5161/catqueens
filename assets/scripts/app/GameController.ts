@@ -11,12 +11,23 @@ import { ActionBar } from '../ui/panels/ActionBar';
 import { FailRevivePanel } from '../ui/panels/FailRevivePanel';
 import { TechniqueGuidePanel } from '../ui/panels/TechniqueGuidePanel';
 import { techniqueGuideForLevel } from '../core/level/LevelTechniques';
+import {
+  findCoachStep,
+  nextCoachPointer,
+  type CoachStep,
+} from '../core/level/TechniqueCoach';
 import { GameSession, type SessionSnapshot } from './GameSession';
 import { SceneRouter } from './SceneRouter';
 
 import { STARTER_LEVELS } from '../data/StarterLevels';
 
 const { ccclass } = _decorator;
+
+interface CoachRuntime {
+  step: CoachStep;
+  /** Targets the player has successfully completed. */
+  done: Set<number>;
+}
 
 @ccclass('GameController')
 export class GameController extends Component {
@@ -30,6 +41,7 @@ export class GameController extends Component {
   private message = '';
   private levels = new LevelRepository();
   private reviveBusy = false;
+  private coach: CoachRuntime | null = null;
 
   onLoad(): void {
     saveService.setStorage(new CocosStorageAdapter());
@@ -53,33 +65,49 @@ export class GameController extends Component {
     this.input = new BoardInputController({
       hitTest: (x, y) => this.boardView.hitTest(x, y),
       onTap: (i) => {
-        if (this.techniqueGuide?.isVisible()) return;
         if (!this.session.canAcceptInput()) return;
+        if (this.coach) {
+          this.handleCoachTap(i);
+          return;
+        }
         this.message = '';
         this.boardView.setPendingTap(null);
         this.session.applyTap(i);
       },
       onDoubleTap: (i) => {
-        if (this.techniqueGuide?.isVisible()) return;
         if (!this.session.canAcceptInput()) return;
+        if (this.coach) {
+          this.handleCoachDoubleTap(i);
+          return;
+        }
         this.message = '';
         this.boardView.setPendingTap(null);
         this.session.applyDoubleTap(i);
       },
       onSwipeBegin: () => {
-        if (this.techniqueGuide?.isVisible()) return;
         if (!this.session.canAcceptInput()) return;
+        if (this.coach && this.coach.step.action !== 'EXCLUDE') return;
         this.message = '';
         this.boardView.setPendingTap(null);
         this.session.beginSwipeExclude();
       },
       onSwipePaint: (i) => {
+        if (this.coach) {
+          if (this.coach.step.action !== 'EXCLUDE') return;
+          if (!this.coach.step.targetCells.includes(i)) return;
+          if (this.coach.done.has(i)) return;
+        }
         this.session.paintSwipeExclude(i);
+        if (this.coach) this.syncCoachAfterBoard();
       },
       onSwipeEnd: () => {
         this.session.endSwipeExclude();
+        if (this.coach) this.syncCoachAfterBoard();
       },
-      onLongPress: (i) => this.boardView.setHighlight(i),
+      onLongPress: (i) => {
+        if (this.coach) return;
+        this.boardView.setHighlight(i);
+      },
       onLongPressEnd: () => this.boardView.clearHighlight(),
       onPendingTap: (i) => this.boardView.setPendingTap(i),
     });
@@ -93,18 +121,30 @@ export class GameController extends Component {
 
     this.actionBar.setHandlers({
       onUndo: () => {
+        if (this.coach) return;
         this.message = '';
         this.session.undo();
       },
-      onRedo: () => this.session.redo(),
-      onHint: () => this.handleHint(),
+      onRedo: () => {
+        if (this.coach) return;
+        this.session.redo();
+      },
+      onHint: () => {
+        if (this.coach) return;
+        this.handleHint();
+      },
       onClear: () => {
+        if (this.coach) return;
         this.message = '';
         this.boardView.setHintCells([]);
         this.session.clearBoard();
       },
-      onNext: () => this.goNext(),
+      onNext: () => {
+        if (this.coach) return;
+        this.goNext();
+      },
       onApplyHint: () => {
+        if (this.coach) return;
         const snap = this.session.confirmApplyHint();
         this.boardView.setHintCells([]);
         this.actionBar.setApplyVisible(false);
@@ -125,7 +165,7 @@ export class GameController extends Component {
         this.actionBar.setApplyVisible(false);
         const snap = this.session.retryLevel();
         this.message = this.defaultTipFor(snap);
-        this.maybeShowTechniqueGuide(snap.level.id);
+        this.maybeStartTechniqueCoach(snap.level.id);
       },
     });
 
@@ -135,7 +175,7 @@ export class GameController extends Component {
     this.message = this.defaultTipFor(snap);
     this.hud.render(snap, this.message);
     this.failPanel.render(snap);
-    this.maybeShowTechniqueGuide(snap.level.id);
+    this.maybeStartTechniqueCoach(snap.level.id);
   }
 
   onDestroy(): void {
@@ -184,26 +224,85 @@ export class GameController extends Component {
     this.message = this.defaultTipFor(nextSnap);
     this.hud.render(nextSnap, this.message);
     this.failPanel.render(nextSnap);
-    this.maybeShowTechniqueGuide(nextSnap.level.id);
+    this.maybeStartTechniqueCoach(nextSnap.level.id);
   }
 
-  /** Show modal when entering the first level of T1–T6. */
-  private maybeShowTechniqueGuide(levelId: number): void {
+  /** Interactive on-board coach at T1–T6 first teach levels. */
+  private maybeStartTechniqueCoach(levelId: number): void {
+    this.clearCoach();
     const tech = techniqueGuideForLevel(levelId);
-    if (!tech) {
-      this.techniqueGuide?.hide();
+    if (!tech) return;
+    const level = this.levels.getById(levelId);
+    if (!level) return;
+    const step = findCoachStep(level, tech);
+    if (!step || step.targetCells.length === 0) return;
+    this.coach = { step, done: new Set() };
+    this.techniqueGuide.show(step);
+    this.refreshCoachSpotlight();
+  }
+
+  private clearCoach(): void {
+    this.coach = null;
+    this.techniqueGuide?.hide();
+    this.boardView?.setCoachSpotlight(null);
+  }
+
+  private refreshCoachSpotlight(): void {
+    if (!this.coach) {
+      this.boardView.setCoachSpotlight(null);
       return;
     }
-    this.techniqueGuide.show(tech);
+    const { step, done } = this.coach;
+    const pending = step.targetCells.filter((i) => !done.has(i));
+    this.boardView.setCoachSpotlight({
+      focus: step.focusCells,
+      targets: pending,
+      pointer: nextCoachPointer(step.targetCells, done),
+    });
   }
 
-  /** Levels 1–2 show onboarding tips; later empty boards get exclude gesture tip. */
+  private handleCoachTap(index: number): void {
+    if (!this.coach || this.coach.step.action !== 'EXCLUDE') return;
+    if (!this.coach.step.targetCells.includes(index)) return;
+    if (this.coach.done.has(index)) return;
+    this.boardView.setPendingTap(null);
+    this.session.applyTap(index);
+    this.syncCoachAfterBoard();
+  }
+
+  private handleCoachDoubleTap(index: number): void {
+    if (!this.coach || this.coach.step.action !== 'PLACE_CAT') return;
+    if (!this.coach.step.targetCells.includes(index)) return;
+    this.boardView.setPendingTap(null);
+    this.session.applyDoubleTap(index);
+    this.syncCoachAfterBoard();
+  }
+
+  /** Mark completed targets from current board; finish coach when all done. */
+  private syncCoachAfterBoard(): void {
+    if (!this.coach) return;
+    const board = this.session.getSnapshot().board;
+    const { step, done } = this.coach;
+    for (const idx of step.targetCells) {
+      if (done.has(idx)) continue;
+      if (step.action === 'EXCLUDE' && board[idx] === 'EXCLUDED') done.add(idx);
+      if (step.action === 'PLACE_CAT' && board[idx] === 'CAT') done.add(idx);
+    }
+    if (step.targetCells.every((i) => done.has(i))) {
+      this.clearCoach();
+      this.message = '';
+      this.hud.render(this.session.getSnapshot(), this.message);
+      return;
+    }
+    this.refreshCoachSpotlight();
+  }
+
+  /** Levels 1–2 show onboarding tips; coach levels keep tip empty (bubble owns copy). */
   private defaultTipFor(snap: SessionSnapshot): string {
     if (snap.noStamina || snap.levelFailed) return this.message;
     const id = snap.level.id;
     if (id === 1 || id === 2) return i18n.t(`tutorial.${id}`);
-    const tech = techniqueGuideForLevel(id);
-    if (tech) return i18n.t(`technique.${tech}`);
+    if (techniqueGuideForLevel(id)) return '';
     const hasMarks = snap.board.some((c) => c !== 'EMPTY');
     if (!hasMarks) return i18n.t('board.tip_exclude');
     return '';
@@ -221,6 +320,7 @@ export class GameController extends Component {
     this.message = msg;
     this.hud.render(snap, msg);
     this.failPanel.render(snap);
+    if (this.coach) this.refreshCoachSpotlight();
   }
 
   private buildUi(): void {
