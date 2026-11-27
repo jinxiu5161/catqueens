@@ -168,6 +168,23 @@ export class GameSession {
     return !this.won && !this.needsRevive && !this.levelFailed && !this.noStamina;
   }
 
+  /**
+   * Seed tutorial cats onto an empty (or mostly empty) board without undo history.
+   * Used by L3 onboarding where the first singleton is shown for free.
+   */
+  seedTutorialCats(indexes: number[]): SessionSnapshot {
+    if (!this.canAcceptInput()) return this.emit();
+    let changed = false;
+    for (const index of indexes) {
+      if (!this.inBounds(index)) continue;
+      if (this.board[index] !== 'EMPTY') continue;
+      this.board[index] = 'CAT';
+      changed = true;
+    }
+    if (changed) this.persistRun();
+    return this.emit();
+  }
+
   /** Apply a single-cell toggle for tap (EMPTY <-> EXCLUDED). CAT ignored. */
   applyTap(index: number): SessionSnapshot {
     if (!this.canAcceptInput() || !this.inBounds(index)) return this.emit();

@@ -2,7 +2,11 @@ import type { LevelDefinition } from '../puzzle/PuzzleTypes';
 import { colOf, rowOf } from '../puzzle/PuzzleTypes';
 import { neighborIndexes } from '../puzzle/PuzzleRules';
 import { firstForcedPlacement } from './LevelDifficulty';
-import type { TechniqueId } from './LevelTechniques';
+import {
+  coachGuideKeyForLevel,
+  techniqueGuideForLevel,
+  type TechniqueId,
+} from './LevelTechniques';
 
 /** Player must exclude or place a cat on the guided cells. */
 export type CoachAction = 'EXCLUDE' | 'PLACE_CAT';
@@ -366,6 +370,118 @@ function findWhatIfExclude(level: LevelDefinition): CoachStep | null {
   return best ?? findPigeonExclude(level, 2, 'T6');
 }
 
+/** Solution cats whose region is a single cell (instant “must place”). */
+export function singletonSolutionCats(level: LevelDefinition): number[] {
+  const buckets = regionBuckets(level);
+  const solution = new Set(level.solution ?? []);
+  const out: number[] = [];
+  for (let rid = 0; rid < level.size; rid++) {
+    const cells = buckets[rid]!;
+    if (cells.length !== 1) continue;
+    const cell = cells[0]!;
+    if (solution.has(cell)) out.push(cell);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+function rowColExcludeTargets(level: LevelDefinition, cat: number): number[] {
+  const size = level.size;
+  const r = rowOf(cat, size);
+  const c = colOf(cat, size);
+  const out: number[] = [];
+  for (let i = 0; i < size * size; i++) {
+    if (i === cat) continue;
+    if (rowOf(i, size) === r || colOf(i, size) === c) out.push(i);
+  }
+  return out;
+}
+
+function rowColFocus(level: LevelDefinition, cat: number): number[] {
+  const size = level.size;
+  const r = rowOf(cat, size);
+  const c = colOf(cat, size);
+  const focus: number[] = [];
+  for (let i = 0; i < size * size; i++) {
+    if (rowOf(i, size) === r || colOf(i, size) === c) focus.push(i);
+  }
+  return focus;
+}
+
+/** L1: double-tap first singleton cat → exclude its row & column. */
+function findL1Lesson(level: LevelDefinition): CoachStep[] {
+  const singles = singletonSolutionCats(level);
+  const cat = singles[0];
+  if (cat == null) return [];
+  const place: CoachStep = {
+    technique: 'T0',
+    action: 'PLACE_CAT',
+    focusCells: focusAroundCell(level, cat),
+    targetCells: [cat],
+    regionId: level.regions[cat],
+    messageKey: 'coach.L1_place',
+  };
+  const targets = rowColExcludeTargets(level, cat);
+  const exclude: CoachStep = {
+    technique: 'T0',
+    action: 'EXCLUDE',
+    focusCells: rowColFocus(level, cat),
+    targetCells: targets,
+    regionId: level.regions[cat],
+    messageKey: 'coach.L1_rowcol',
+  };
+  return targets.length ? [place, exclude] : [place];
+}
+
+/**
+ * L3: first singleton cat is already shown; swipe-exclude its 8-neighbors.
+ * `prePlaceCats` tells the UI which cell to seed before the gesture.
+ */
+export function findL3Lesson(level: LevelDefinition): {
+  steps: CoachStep[];
+  prePlaceCats: number[];
+} {
+  const singles = singletonSolutionCats(level);
+  const cat = singles[0];
+  if (cat == null) return { steps: [], prePlaceCats: [] };
+  const neighbors = neighborIndexes(cat, level.size);
+  if (neighbors.length === 0) return { steps: [], prePlaceCats: [] };
+  const step: CoachStep = {
+    technique: 'T0',
+    action: 'EXCLUDE',
+    focusCells: [cat, ...neighbors],
+    targetCells: neighbors,
+    regionId: level.regions[cat],
+    messageKey: 'coach.L3_adj',
+  };
+  return { steps: [step], prePlaceCats: [cat] };
+}
+
+export interface LevelCoachPlan {
+  /** Save key (L1 / L3 / T1…). */
+  guideKey: string;
+  steps: CoachStep[];
+  /** Cats to place on an empty board before coaching (L3). */
+  prePlaceCats: number[];
+}
+
+/** Level-aware coach plan (early onboarding + T1–T6 teach). */
+export function findLevelCoachPlan(level: LevelDefinition): LevelCoachPlan | null {
+  const guideKey = coachGuideKeyForLevel(level.id);
+  if (!guideKey) return null;
+  if (level.id === 1) {
+    const steps = findL1Lesson(level);
+    return steps.length ? { guideKey, steps, prePlaceCats: [] } : null;
+  }
+  if (level.id === 3) {
+    const { steps, prePlaceCats } = findL3Lesson(level);
+    return steps.length ? { guideKey, steps, prePlaceCats } : null;
+  }
+  const tech = techniqueGuideForLevel(level.id);
+  if (!tech) return null;
+  const steps = findCoachLesson(level, tech);
+  return steps.length ? { guideKey, steps, prePlaceCats: [] } : null;
+}
+
 /**
  * Build the interactive coach step for a teach level.
  * Returns null when the board has no clear demo structure.
@@ -384,6 +500,10 @@ export function findCoachLesson(
   technique: TechniqueId,
 ): CoachStep[] {
   switch (technique) {
+    case 'T0':
+      if (level.id === 1) return findL1Lesson(level);
+      if (level.id === 3) return findL3Lesson(level).steps;
+      return [];
     case 'T1': {
       const s = findLinePinExclude(level);
       return s ? [s] : [];

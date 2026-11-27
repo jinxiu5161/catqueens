@@ -331,7 +331,7 @@ export function curriculumFor(id: number): Lesson {
 
 /**
  * First level that introduces each technique (interactive board coach).
- * T0 uses tutorial.1 / tutorial.2 instead.
+ * Early T0 onboarding uses level-specific keys L1 / L3 (see TechniqueCoach).
  */
 export const TECHNIQUE_GUIDE_LEVEL: Partial<Record<TechniqueId, number>> = {
   T1: 5,
@@ -349,4 +349,11 @@ export function techniqueGuideForLevel(id: number): TechniqueId | null {
     if (levelId === id) return tech;
   }
   return null;
+}
+
+/** Stable save key for “coach already seen” (L1/L3 or T1–T6). */
+export function coachGuideKeyForLevel(id: number): string | null {
+  if (id === 1) return 'L1';
+  if (id === 3) return 'L3';
+  return techniqueGuideForLevel(id);
 }

@@ -10,13 +10,12 @@ import { GameHUD } from '../ui/hud/GameHUD';
 import { ActionBar } from '../ui/panels/ActionBar';
 import { FailRevivePanel } from '../ui/panels/FailRevivePanel';
 import { TechniqueGuidePanel } from '../ui/panels/TechniqueGuidePanel';
-import { techniqueGuideForLevel } from '../core/level/LevelTechniques';
+import { coachGuideKeyForLevel } from '../core/level/LevelTechniques';
 import {
-  findCoachLesson,
+  findLevelCoachPlan,
   nextCoachPointer,
   type CoachStep,
 } from '../core/level/TechniqueCoach';
-import type { TechniqueId } from '../core/level/LevelTechniques';
 import { GameSession, type SessionSnapshot } from './GameSession';
 import { SceneRouter } from './SceneRouter';
 
@@ -25,7 +24,8 @@ import { STARTER_LEVELS } from '../data/StarterLevels';
 const { ccclass } = _decorator;
 
 interface CoachRuntime {
-  technique: TechniqueId;
+  /** Save key: L1 / L3 / T1… */
+  guideKey: string;
   steps: CoachStep[];
   stepIndex: number;
   /** Targets completed on the current step. */
@@ -232,32 +232,44 @@ export class GameController extends Component {
     this.maybeStartTechniqueCoach(nextSnap.level.id);
   }
 
-  /** Interactive on-board coach at T1–T6 first teach levels (once per technique). */
+  /** Interactive on-board coach (L1/L3 onboarding + T1–T6 teach); once per guide key. */
   private maybeStartTechniqueCoach(levelId: number): void {
     this.clearCoach();
-    const tech = techniqueGuideForLevel(levelId);
-    if (!tech) return;
-    if (this.hasSeenTechniqueGuide(tech)) return;
+    const guideKey = coachGuideKeyForLevel(levelId);
+    if (!guideKey) return;
+    if (this.hasSeenTechniqueGuide(guideKey)) return;
     const level = this.levels.getById(levelId);
     if (!level) return;
-    const steps = findCoachLesson(level, tech).filter((s) => s.targetCells.length > 0);
+    const plan = findLevelCoachPlan(level);
+    if (!plan) return;
+    const steps = plan.steps.filter((s) => s.targetCells.length > 0);
     if (steps.length === 0) return;
-    this.coach = { technique: tech, steps, stepIndex: 0, done: new Set() };
+
+    // Don't interrupt a resumed mid-level run (except L3 seed on a still-empty board).
+    const board = this.session.getSnapshot().board;
+    const isEmpty = board.every((c) => c === 'EMPTY');
+    if (!isEmpty) return;
+
+    if (plan.prePlaceCats.length) {
+      this.session.seedTutorialCats(plan.prePlaceCats);
+    }
+
+    this.coach = { guideKey, steps, stepIndex: 0, done: new Set() };
     this.techniqueGuide.setBoardFrame(this.boardView.getBoardFrameInParent());
     this.techniqueGuide.show(steps[0]!);
     this.refreshCoachSpotlight();
   }
 
-  private hasSeenTechniqueGuide(tech: TechniqueId): boolean {
+  private hasSeenTechniqueGuide(guideKey: string): boolean {
     const seen = this.session.getSave().progress.seenTechniqueGuides ?? [];
-    return seen.includes(tech);
+    return seen.includes(guideKey);
   }
 
-  private markTechniqueGuideSeen(tech: TechniqueId): void {
+  private markTechniqueGuideSeen(guideKey: string): void {
     const save = this.session.getSave();
     const seen = save.progress.seenTechniqueGuides ?? [];
-    if (seen.includes(tech)) return;
-    save.progress.seenTechniqueGuides = [...seen, tech];
+    if (seen.includes(guideKey)) return;
+    save.progress.seenTechniqueGuides = [...seen, guideKey];
     saveService.save(save);
   }
 
@@ -333,19 +345,19 @@ export class GameController extends Component {
       return;
     }
 
-    this.markTechniqueGuideSeen(this.coach.technique);
+    this.markTechniqueGuideSeen(this.coach.guideKey);
     this.clearCoach();
     this.message = '';
     this.hud.render(this.session.getSnapshot(), this.message);
   }
 
-  /** Levels 1–2 show onboarding tips; active coach levels leave tip empty (bubble owns copy). */
+  /** HUD tip; active coach levels leave tip empty (bubble owns copy). */
   private defaultTipFor(snap: SessionSnapshot): string {
     if (snap.noStamina || snap.levelFailed) return this.message;
     const id = snap.level.id;
-    if (id === 1 || id === 2) return i18n.t(`tutorial.${id}`);
-    const tech = techniqueGuideForLevel(id);
-    if (tech && !this.hasSeenTechniqueGuide(tech)) return '';
+    const guideKey = coachGuideKeyForLevel(id);
+    if (guideKey && !this.hasSeenTechniqueGuide(guideKey)) return '';
+    if (id === 2) return i18n.t('tutorial.2');
     const hasMarks = snap.board.some((c) => c !== 'EMPTY');
     if (!hasMarks) return i18n.t('board.tip_exclude');
     return '';
