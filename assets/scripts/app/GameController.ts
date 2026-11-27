@@ -9,6 +9,8 @@ import { BOARD_THEME } from '../ui/board/BoardTheme';
 import { GameHUD } from '../ui/hud/GameHUD';
 import { ActionBar } from '../ui/panels/ActionBar';
 import { FailRevivePanel } from '../ui/panels/FailRevivePanel';
+import { TechniqueGuidePanel } from '../ui/panels/TechniqueGuidePanel';
+import { techniqueGuideForLevel } from '../core/level/LevelTechniques';
 import { GameSession, type SessionSnapshot } from './GameSession';
 import { SceneRouter } from './SceneRouter';
 
@@ -23,6 +25,7 @@ export class GameController extends Component {
   private hud!: GameHUD;
   private actionBar!: ActionBar;
   private failPanel!: FailRevivePanel;
+  private techniqueGuide!: TechniqueGuidePanel;
   private input!: BoardInputController;
   private message = '';
   private levels = new LevelRepository();
@@ -50,18 +53,21 @@ export class GameController extends Component {
     this.input = new BoardInputController({
       hitTest: (x, y) => this.boardView.hitTest(x, y),
       onTap: (i) => {
+        if (this.techniqueGuide?.isVisible()) return;
         if (!this.session.canAcceptInput()) return;
         this.message = '';
         this.boardView.setPendingTap(null);
         this.session.applyTap(i);
       },
       onDoubleTap: (i) => {
+        if (this.techniqueGuide?.isVisible()) return;
         if (!this.session.canAcceptInput()) return;
         this.message = '';
         this.boardView.setPendingTap(null);
         this.session.applyDoubleTap(i);
       },
       onSwipeBegin: () => {
+        if (this.techniqueGuide?.isVisible()) return;
         if (!this.session.canAcceptInput()) return;
         this.message = '';
         this.boardView.setPendingTap(null);
@@ -117,7 +123,9 @@ export class GameController extends Component {
         this.message = '';
         this.boardView.setHintCells([]);
         this.actionBar.setApplyVisible(false);
-        this.session.retryLevel();
+        const snap = this.session.retryLevel();
+        this.message = this.defaultTipFor(snap);
+        this.maybeShowTechniqueGuide(snap.level.id);
       },
     });
 
@@ -127,6 +135,7 @@ export class GameController extends Component {
     this.message = this.defaultTipFor(snap);
     this.hud.render(snap, this.message);
     this.failPanel.render(snap);
+    this.maybeShowTechniqueGuide(snap.level.id);
   }
 
   onDestroy(): void {
@@ -175,6 +184,17 @@ export class GameController extends Component {
     this.message = this.defaultTipFor(nextSnap);
     this.hud.render(nextSnap, this.message);
     this.failPanel.render(nextSnap);
+    this.maybeShowTechniqueGuide(nextSnap.level.id);
+  }
+
+  /** Show modal when entering the first level of T1–T6. */
+  private maybeShowTechniqueGuide(levelId: number): void {
+    const tech = techniqueGuideForLevel(levelId);
+    if (!tech) {
+      this.techniqueGuide?.hide();
+      return;
+    }
+    this.techniqueGuide.show(tech);
   }
 
   /** Levels 1–2 show onboarding tips; later empty boards get exclude gesture tip. */
@@ -182,6 +202,8 @@ export class GameController extends Component {
     if (snap.noStamina || snap.levelFailed) return this.message;
     const id = snap.level.id;
     if (id === 1 || id === 2) return i18n.t(`tutorial.${id}`);
+    const tech = techniqueGuideForLevel(id);
+    if (tech) return i18n.t(`technique.${tech}`);
     const hasMarks = snap.board.some((c) => c !== 'EMPTY');
     if (!hasMarks) return i18n.t('board.tip_exclude');
     return '';
@@ -236,6 +258,11 @@ export class GameController extends Component {
     failNode.layer = root.layer;
     this.failPanel = failNode.addComponent(FailRevivePanel);
     root.addChild(failNode);
+
+    const guideNode = new Node('TechniqueGuide');
+    guideNode.layer = root.layer;
+    this.techniqueGuide = guideNode.addComponent(TechniqueGuidePanel);
+    root.addChild(guideNode);
   }
 
   /** Optional: jump menu */

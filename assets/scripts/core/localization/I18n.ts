@@ -36,6 +36,20 @@ const ZH_CN: Record<string, string> = {
   // Levels 1–2 onboarding — keep short so 4×4 does not feel repetitive
   'tutorial.1': '每行、每列、每个色区各放一只猫；猫不能相邻（含斜角）。单格色区可直接放。',
   'tutorial.2': '单击排除做笔记；当某行/列/色区只剩一格能放时，那里必然是猫。',
+  'technique.guide_title': '新技巧：{name}',
+  'technique.ok': '明白了',
+  'technique.T1':
+    '若某个色区的格子全部落在同一行（或同一列），那只猫必在这一行/列里——其余格子可以先叉掉。',
+  'technique.T2':
+    '若两个色区的全部格子都挤在某两列里，这两列恰好各有一只猫——列里不属于这两区的格子可排除。',
+  'technique.T3':
+    '放下一只猫后，马上叉掉同行、同列、同色区和周围八格；常会逼出下一只「只剩一格」的强制猫。',
+  'technique.T4':
+    '把双区鸽巢推广：三个色区挤进三行或三列时，同样可以整行/列排除无关格子。',
+  'technique.T5':
+    '注意只剩两格的色区：它们常和「某行只剩两个候选」联动，互相卡住后可以排除矛盾一侧。',
+  'technique.T6':
+    '当没有强制落点时，可对某个二选一格试放一步：若立刻矛盾就叉掉它，再换另一侧。',
   'conflict.row': '同一行不能有多只猫',
   'conflict.column': '同一列不能有多只猫',
   'conflict.region': '同一色区不能有多只猫',

@@ -3,11 +3,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LevelsFile } from '../../assets/scripts/core/level/LevelDefinition';
 import {
+  TECHNIQUE_GUIDE_LEVEL,
   TECHNIQUE_LABELS,
   analyzeTechniques,
+  curriculumFor,
   hasPigeonhole,
+  techniqueGuideForLevel,
 } from '../../assets/scripts/core/level/LevelTechniques';
-import { curriculumFor } from '../../assets/scripts/core/level/LevelTechniques';
 
 const file = JSON.parse(
   readFileSync(join(process.cwd(), 'assets/resources/data/levels.json'), 'utf8'),
@@ -23,10 +25,20 @@ describe('technique curriculum', () => {
   it('curriculum milestones match intended techniques', () => {
     expect(curriculumFor(1).technique).toBe('T0');
     expect(curriculumFor(5).technique).toBe('T1');
+    expect(curriculumFor(13).size).toBe(5);
+    expect(curriculumFor(14).size).toBe(5);
     expect(curriculumFor(30).technique).toBe('T2');
     expect(curriculumFor(55).technique).toBe('T4');
     expect(curriculumFor(110).technique).toBe('T5');
     expect(curriculumFor(300).technique).toBe('T6');
+  });
+
+  it('technique guides fire on first teach levels', () => {
+    expect(techniqueGuideForLevel(5)).toBe('T1');
+    expect(techniqueGuideForLevel(15)).toBe('T3');
+    expect(techniqueGuideForLevel(29)).toBe('T2');
+    expect(techniqueGuideForLevel(6)).toBeNull();
+    expect(TECHNIQUE_GUIDE_LEVEL.T1).toBe(5);
   });
 
   it('generated pack follows curriculum technique tags', () => {

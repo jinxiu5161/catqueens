@@ -177,7 +177,8 @@ export function curriculumFor(id: number): Lesson {
       mode: 'teach',
     };
   }
-  if (id <= 12) {
+  if (id <= 14) {
+    // Stay on 5×5 for all T1 practice (no awkward dip back to 4×4)
     return {
       technique: 'T1',
       size: 5,
@@ -188,15 +189,14 @@ export function curriculumFor(id: number): Lesson {
       mode: 'practice',
     };
   }
-  if (id <= 14) {
+  if (id === 15) {
     return {
-      technique: 'T1',
-      size: 4,
+      technique: 'T3',
+      size: 5,
       requireNoGuess: true,
       minSingles: 0,
       maxSingles: 1,
-      requireLinePin: true,
-      mode: 'practice',
+      mode: 'teach',
     };
   }
   if (id <= 20) {
@@ -327,4 +327,26 @@ export function curriculumFor(id: number): Lesson {
     maxSingles: 3,
     mode: 'practice',
   };
+}
+
+/**
+ * First level that introduces each technique (show onboarding modal).
+ * T0 uses tutorial.1 / tutorial.2 instead.
+ */
+export const TECHNIQUE_GUIDE_LEVEL: Partial<Record<TechniqueId, number>> = {
+  T1: 5,
+  T3: 15,
+  T2: 29,
+  T4: 51,
+  T5: 101,
+  T6: 261,
+};
+
+export function techniqueGuideForLevel(id: number): TechniqueId | null {
+  for (const [tech, levelId] of Object.entries(TECHNIQUE_GUIDE_LEVEL) as Array<
+    [TechniqueId, number]
+  >) {
+    if (levelId === id) return tech;
+  }
+  return null;
 }

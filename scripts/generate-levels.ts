@@ -814,6 +814,7 @@ function main(): void {
       seenCanon.add(c);
     }
     for (const id of [1, 2, 5, 30, 55, 110, 300]) {
+      if (id < startId || id > count) continue;
       const l = levels.find((x) => x.id === id);
       const lesson = curriculumFor(id);
       if (!l || l.technique !== lesson.technique) {

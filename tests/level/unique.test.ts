@@ -26,6 +26,11 @@ describe('starter levels unique solution gate', () => {
     }
     expect(file.levels.find((l) => l.id === 5)!.size).toBe(5);
     expect(file.levels.find((l) => l.id === 5)!.technique).toBe('T1');
+    for (const id of [13, 14]) {
+      const level = file.levels.find((l) => l.id === id)!;
+      expect(level.size, `level ${id} stays 5×5`).toBe(5);
+      expect(level.technique).toBe('T1');
+    }
     const early = file.levels.filter((l) => l.id <= 50);
     for (const level of early) {
       expect(level.noGuess, `level ${level.id} should be noGuess`).toBe(true);
