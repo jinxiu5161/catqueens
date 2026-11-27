@@ -55,9 +55,9 @@ const ZH_CN: Record<string, string> = {
     '当没有强制落点时，可对某个二选一格试放一步：若立刻矛盾就叉掉它，再换另一侧。',
   // Interactive board coach (bubble); {region} → color chip beside text
   'coach.T1_row':
-    '我们学习过，由于{region}中一定有一只小猫，所以这一行其他格子可以先划掉排除',
+    '由于{region}整区都在这一行，先划掉行上其他格子——会逼出第一只猫',
   'coach.T1_col':
-    '我们学习过，由于{region}中一定有一只小猫，所以这一列其他格子可以先划掉排除',
+    '由于{region}整区都在这一列，先划掉列上其他格子——会逼出第一只猫',
   'coach.T2_row': '{region}{region} 这两个色区挤在两行里，行上不属于它们的格子可以先排除',
   'coach.T2_col': '{region}{region} 这两个色区挤在两列里，列上不属于它们的格子可以先排除',
   'coach.T3_place': '这里只剩一格能放——双击放上小猫',

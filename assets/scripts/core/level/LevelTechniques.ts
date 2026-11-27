@@ -167,12 +167,13 @@ export function curriculumFor(id: number): Lesson {
     };
   }
   if (id === 5) {
+    // T1 teach: no free singleton — line-pin exclude must unlock the first cat.
     return {
       technique: 'T1',
       size: 5,
-      requireNoGuess: true,
+      requireNoGuess: false,
       minSingles: 0,
-      maxSingles: 1,
+      maxSingles: 0,
       requireLinePin: true,
       mode: 'teach',
     };

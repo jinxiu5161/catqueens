@@ -91,11 +91,19 @@ function scorePigeonDemo(excludeCount: number, k: number): number {
   return score;
 }
 
-/** Region fully contained in one row or one column (size ≥ 2). */
-function findLinePinExclude(level: LevelDefinition): CoachStep | null {
+export interface LinePinExcludeDemo {
+  regionId: number;
+  axis: 'row' | 'col';
+  excludeCells: number[];
+  focusCells: number[];
+  regionSize: number;
+}
+
+/** Best line-pin clear (full exclude list, for quality checks / coach). */
+export function findBestLinePinExclude(level: LevelDefinition): LinePinExcludeDemo | null {
   const size = level.size;
   const buckets = regionBuckets(level);
-  let best: CoachStep | null = null;
+  let best: LinePinExcludeDemo | null = null;
   let bestScore = -1;
 
   for (let rid = 0; rid < size; rid++) {
@@ -119,22 +127,34 @@ function findLinePinExclude(level: LevelDefinition): CoachStep | null {
     }
     if (exclude.length === 0) continue;
 
-    const step: CoachStep = {
-      technique: 'T1',
-      action: 'EXCLUDE',
-      focusCells: focus,
-      targetCells: capTargets(exclude),
-      regionId: rid,
-      axis,
-      messageKey: axis === 'row' ? 'coach.T1_row' : 'coach.T1_col',
-    };
     const score = scoreLinePinDemo(exclude.length, cells.length);
     if (score > bestScore) {
       bestScore = score;
-      best = step;
+      best = {
+        regionId: rid,
+        axis,
+        excludeCells: exclude,
+        focusCells: focus,
+        regionSize: cells.length,
+      };
     }
   }
   return best;
+}
+
+/** Region fully contained in one row or one column (size ≥ 2). */
+function findLinePinExclude(level: LevelDefinition): CoachStep | null {
+  const demo = findBestLinePinExclude(level);
+  if (!demo) return null;
+  return {
+    technique: 'T1',
+    action: 'EXCLUDE',
+    focusCells: demo.focusCells,
+    targetCells: capTargets(demo.excludeCells),
+    regionId: demo.regionId,
+    axis: demo.axis,
+    messageKey: demo.axis === 'row' ? 'coach.T1_row' : 'coach.T1_col',
+  };
 }
 
 export interface PigeonExcludeDemo {

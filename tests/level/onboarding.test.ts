@@ -11,6 +11,7 @@ import {
 import {
   level2RowColChainOk,
   level3AdjChainOk,
+  level5NeedsT1ForFirstCat,
   level29NeedsT2ForFirstCat,
 } from '../../assets/scripts/core/level/OnboardingChain';
 import {
@@ -62,6 +63,16 @@ describe('early onboarding levels 1–3', () => {
   it('L15 has no interactive technique coach', () => {
     expect(coachGuideKeyForLevel(15)).toBeNull();
     expect(findLevelCoachPlan(file.levels.find((l) => l.id === 15)!)).toBeNull();
+  });
+
+  it('L5 needs T1 exclude before the first cat is forced', () => {
+    const level = file.levels.find((l) => l.id === 5)!;
+    expect(coachGuideKeyForLevel(5)).toBe('T1');
+    expect(firstForcedPlacement(level)).toBeNull();
+    expect(level5NeedsT1ForFirstCat(level)).toBe(true);
+    const plan = findLevelCoachPlan(level)!;
+    expect(plan.steps[0]?.action).toBe('EXCLUDE');
+    expect(plan.steps[0]!.targetCells.length).toBeGreaterThanOrEqual(2);
   });
 
   it('L29 needs T2 exclude before the first cat is forced', () => {

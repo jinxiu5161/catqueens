@@ -2,7 +2,11 @@ import { neighborIndexes } from '../puzzle/PuzzleRules';
 import type { LevelDefinition } from '../puzzle/PuzzleTypes';
 import { colOf, rowOf } from '../puzzle/PuzzleTypes';
 import { firstForcedPlacement } from './LevelDifficulty';
-import { findBestPigeonExclude, singletonSolutionCats } from './TechniqueCoach';
+import {
+  findBestLinePinExclude,
+  findBestPigeonExclude,
+  singletonSolutionCats,
+} from './TechniqueCoach';
 
 /**
  * Beginner “open” cells: not a cat and not an exclude-note.
@@ -180,4 +184,22 @@ export function level29NeedsT2ForFirstCat(level: LevelDefinition): boolean {
   const after = beginnerForcedCats(level, [], new Set(demo.excludeCells));
   const solution = new Set(level.solution ?? []);
   return after.some((i) => solution.has(i));
+}
+
+/**
+ * L5 T1 teach: no free first cat; completing the line-pin exclude must unlock
+ * a one-cell color region that is a solution cat.
+ */
+export function level5NeedsT1ForFirstCat(level: LevelDefinition): boolean {
+  if (firstForcedPlacement(level) != null) return false;
+  if (beginnerForcedCats(level, [], new Set()).length > 0) return false;
+  if (regionOpenSingletons(level, [], new Set()).length > 0) return false;
+
+  const demo = findBestLinePinExclude(level);
+  if (!demo || demo.excludeCells.length < 2) return false;
+
+  const excluded = new Set(demo.excludeCells);
+  const unlocked = regionOpenSingletons(level, [], excluded);
+  const solution = new Set(level.solution ?? []);
+  return unlocked.some((i) => solution.has(i));
 }
