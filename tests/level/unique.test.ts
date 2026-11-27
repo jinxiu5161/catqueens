@@ -47,6 +47,38 @@ describe('starter levels unique solution gate', () => {
     }
   });
 
+  it('no two levels share the same board (incl. region-id relabel)', () => {
+    const seen = new Set<string>();
+    for (const level of file.levels) {
+      const map = new Map<number, number>();
+      let next = 0;
+      const canon = level.regions
+        .map((rid) => {
+          let m = map.get(rid);
+          if (m === undefined) {
+            m = next++;
+            map.set(rid, m);
+          }
+          return m;
+        })
+        .join(',');
+      const key = `${level.size}|${canon}|${[...level.solution].sort((a, b) => a - b).join(',')}`;
+      expect(seen.has(key), `duplicate board at level ${level.id}`).toBe(false);
+      seen.add(key);
+    }
+  });
+
+  it('consecutive early levels do not reuse the same solution when avoidable', () => {
+    // 4×4 only has 2 layouts — require alternation between neighbors
+    for (let id = 2; id <= 7; id++) {
+      const a = file.levels.find((l) => l.id === id - 1)!;
+      const b = file.levels.find((l) => l.id === id)!;
+      const sa = [...a.solution].sort((x, y) => x - y).join(',');
+      const sb = [...b.solution].sort((x, y) => x - y).join(',');
+      expect(sb, `level ${id} should alternate solution vs ${id - 1}`).not.toBe(sa);
+    }
+  });
+
   for (const level of file.levels) {
     it(`level ${level.id} is uniquely solvable from empty board`, () => {
       const report = verifyLevelUnique(level, 4000);

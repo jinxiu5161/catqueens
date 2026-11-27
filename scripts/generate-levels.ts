@@ -408,20 +408,62 @@ function singletonFloor(size: number): number {
   return 4; // 10×10: keep enough singletons for tractable uniqueness
 }
 
+function boardFingerprint(level: LevelDefinition): string {
+  return `${level.size}|R:${level.regions.join(',')}|S:${level.solution.join(',')}`;
+}
+
+function solutionFingerprint(level: LevelDefinition): string {
+  return `${level.size}|${[...level.solution].sort((a, b) => a - b).join(',')}`;
+}
+
+/** Relabel region ids by first-seen order so color-id swaps still match. */
+function canonicalBoardFingerprint(level: LevelDefinition): string {
+  const map = new Map<number, number>();
+  let next = 0;
+  const canon = level.regions.map((rid) => {
+    let mapped = map.get(rid);
+    if (mapped === undefined) {
+      mapped = next++;
+      map.set(rid, mapped);
+    }
+    return mapped;
+  });
+  return `${level.size}|R:${canon.join(',')}|S:${[...level.solution].sort((a, b) => a - b).join(',')}`;
+}
+
 function generateOne(
   id: number,
   seed: number,
-  opts: { maxSingletons: number },
+  opts: {
+    maxSingletons: number;
+    usedBoards: Set<string>;
+    usedCanonical: Set<string>;
+    usedSolutions: Set<string>;
+    prevSolutionKey: string | null;
+    /** 4×4 only has 2 cat layouts — allow reuse after trying to alternate. */
+    strictNewSolution: boolean;
+  },
 ): LevelDefinition | null {
   const size = sizeForLevel(id);
-  const rand = mulberry32(seed);
   const needNoGuess = requireNoGuess(id);
   const singles = opts.maxSingletons; // caller already applied schedule + smooth drop
-  const innerAttempts = size >= 9 ? 60 : size >= 7 ? 90 : 120;
+  const innerAttempts = size >= 9 ? 80 : size >= 7 ? 110 : 160;
 
   for (let attempt = 0; attempt < innerAttempts; attempt++) {
+    // Mix id+attempt into seed so consecutive levels don't recycle the same stream
+    const rand = mulberry32((seed + attempt * 0x9e3779b9 + id * 0x85ebca6b) >>> 0);
     const solution = placeSolution(size, rand);
     if (!solution) continue;
+    const solKey = `${size}|${[...solution].sort((a, b) => a - b).join(',')}`;
+    if (opts.strictNewSolution && opts.usedSolutions.has(solKey)) continue;
+    // Prefer alternating solution vs previous (especially tiny boards)
+    if (
+      opts.prevSolutionKey &&
+      solKey === opts.prevSolutionKey &&
+      attempt < Math.floor(innerAttempts * 0.7)
+    ) {
+      continue;
+    }
 
     // Prefer exact singleton budget; also try one fewer (harder), never more
     const strategies: Array<() => number[] | null> = [];
@@ -448,6 +490,11 @@ function generateOne(
       chapterId: Math.ceil(id / 50),
     };
     if (!puzzleValidator.validateLevel(level).ok) continue;
+
+    const boardKey = boardFingerprint(level);
+    const canonKey = canonicalBoardFingerprint(level);
+    if (opts.usedBoards.has(boardKey) || opts.usedCanonical.has(canonKey)) continue;
+
     const unique = puzzleSolver.solve(level, {
       maxSolutions: 2,
       timeoutMs: solveTimeoutMs(size),
@@ -521,18 +568,30 @@ function main(): void {
 
   let prevSize = -1;
   let prevSingletons = Number.POSITIVE_INFINITY;
+  const usedBoards = new Set<string>();
+  const usedCanonical = new Set<string>();
+  const usedSolutions = new Set<string>();
+  let prevSolutionKey: string | null = null;
   if (levels.length) {
     const last = levels[levels.length - 1]!;
     prevSize = last.size;
     prevSingletons = countSingletonRegions(last);
+    prevSolutionKey = solutionFingerprint(last);
+    for (const l of levels) {
+      usedBoards.add(boardFingerprint(l));
+      usedCanonical.add(canonicalBoardFingerprint(l));
+      usedSolutions.add(solutionFingerprint(l));
+    }
   }
 
   for (let id = startId; id <= count; id++) {
     const size = sizeForLevel(id);
     if (size !== prevSize) {
-      // New size stage: reset (onboarding freeness allowed again)
+      // New size stage: reset freeness + solution pool (boards stay global)
       prevSingletons = Number.POSITIVE_INFINITY;
       prevSize = size;
+      prevSolutionKey = null;
+      usedSolutions.clear();
     }
 
     let level: LevelDefinition | null = null;
@@ -542,15 +601,21 @@ function main(): void {
       prevSingletons === Number.POSITIVE_INFINITY
         ? scheduled
         : Math.min(prevSingletons, Math.max(scheduled, prevSingletons - 1));
-    const maxRetry = requireNoGuess(id) ? 500 : size >= 7 ? 360 : 260;
+    const maxRetry = requireNoGuess(id) ? 700 : size >= 7 ? 420 : 320;
     for (let retry = 0; retry < maxRetry && !level; retry++) {
-      // Late retries: hold singleton count if a drop is hard to find
+      // Late retries: hold singleton count if a drop is scarce
       const tryTarget =
         retry > maxRetry * 0.6 && prevSingletons < Number.POSITIVE_INFINITY
           ? Math.min(prevSingletons, target + 1)
           : target;
       level = generateOne(id, seed++, {
         maxSingletons: Math.min(tryTarget, prevSingletons),
+        usedBoards,
+        usedCanonical,
+        usedSolutions,
+        prevSolutionKey,
+        // 4×4 has only 2 legal cat layouts; 5×5 has 14 for 15 levels — soft late
+        strictNewSolution: size >= 5 && retry < maxRetry * 0.75,
       });
     }
     if (!level) {
@@ -562,6 +627,10 @@ function main(): void {
     const singles = countSingletonRegions(level);
     const hard = levelHardness(level);
     prevSingletons = singles;
+    usedBoards.add(boardFingerprint(level));
+    usedCanonical.add(canonicalBoardFingerprint(level));
+    usedSolutions.add(solutionFingerprint(level));
+    prevSolutionKey = solutionFingerprint(level);
     levels.push(level);
     if (id % 25 === 0 || id === count) {
       const ng = levels.filter((l) => l.noGuess).length;
@@ -600,6 +669,20 @@ function main(): void {
         badEasy.map((l) => l.id),
       );
       process.exit(1);
+    }
+
+    // No duplicate boards (exact or color-relabel isomorphic)
+    const seenBoard = new Set<string>();
+    const seenCanon = new Set<string>();
+    for (const l of levels) {
+      const b = boardFingerprint(l);
+      const c = canonicalBoardFingerprint(l);
+      if (seenBoard.has(b) || seenCanon.has(c)) {
+        console.error(`Duplicate board at level ${l.id}`);
+        process.exit(1);
+      }
+      seenBoard.add(b);
+      seenCanon.add(c);
     }
 
     // Within each size stage: singletons never increase (not easier by freebies)
