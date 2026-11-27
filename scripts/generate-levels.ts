@@ -19,7 +19,11 @@ import {
   type Lesson,
   type TechniqueId,
 } from '../assets/scripts/core/level/LevelTechniques';
-import { findCoachStep } from '../assets/scripts/core/level/TechniqueCoach';
+import {
+  findCoachLesson,
+  scoreCoachLesson,
+  teachCoachMinScore,
+} from '../assets/scripts/core/level/TechniqueCoach';
 import { puzzleSolver } from '../assets/scripts/core/puzzle/PuzzleSolver';
 import { puzzleValidator } from '../assets/scripts/core/puzzle/PuzzleValidator';
 import { neighborIndexes, regionsAreFourConnected } from '../assets/scripts/core/puzzle/PuzzleRules';
@@ -555,12 +559,18 @@ function matchesLesson(level: LevelDefinition, lesson: Lesson, soft = false): bo
   // T6 must actually need guessing; other techniques may be guess or no-guess
   if (lesson.technique === 'T6' && flags.noGuess && !soft) return false;
   if (lesson.requireLinePin && !flags.hasLinePin) return false;
-  // T1 teach should demo a satisfying multi-cell clear (reference-style).
-  if (lesson.mode === 'teach' && lesson.technique === 'T1') {
-    const demo = findCoachStep(level, 'T1');
-    const n = demo?.targetCells.length ?? 0;
-    if (!soft && n < 2) return false;
-    if (soft && n < 1) return false;
+  // Teach boards must feel immediately useful under the interactive coach.
+  // SKIP_TEACH_SCORE=1 lets regen scripts filter score externally (faster search).
+  if (
+    lesson.mode === 'teach' &&
+    lesson.technique !== 'T0' &&
+    process.env.SKIP_TEACH_SCORE !== '1'
+  ) {
+    const steps = findCoachLesson(level, lesson.technique);
+    const score = scoreCoachLesson(steps);
+    const min = teachCoachMinScore(lesson.technique);
+    if (!soft && score < min) return false;
+    if (soft && score < Math.min(40, min)) return false;
   }
   if (lesson.requirePigeonhole === 2) {
     if (!soft && !(flags.hasPigeonhole2 || flags.hasLinePin)) return false;

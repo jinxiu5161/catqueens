@@ -7,6 +7,8 @@ export interface SaveDataV1 {
     maxUnlockedLevel: number;
     clearedLevelIds: number[];
     currentLevelId: number;
+    /** Technique ids (T1–T6) whose interactive coach already ran once. */
+    seenTechniqueGuides?: string[];
   };
   currentRun?: {
     levelId: number;
@@ -65,6 +67,7 @@ export function createDefaultSave(): SaveDataV1 {
       maxUnlockedLevel: 1,
       clearedLevelIds: [],
       currentLevelId: 1,
+      seenTechniqueGuides: [],
     },
     economy: {
       tickets: 2,

@@ -12,10 +12,11 @@ import { FailRevivePanel } from '../ui/panels/FailRevivePanel';
 import { TechniqueGuidePanel } from '../ui/panels/TechniqueGuidePanel';
 import { techniqueGuideForLevel } from '../core/level/LevelTechniques';
 import {
-  findCoachStep,
+  findCoachLesson,
   nextCoachPointer,
   type CoachStep,
 } from '../core/level/TechniqueCoach';
+import type { TechniqueId } from '../core/level/LevelTechniques';
 import { GameSession, type SessionSnapshot } from './GameSession';
 import { SceneRouter } from './SceneRouter';
 
@@ -24,8 +25,10 @@ import { STARTER_LEVELS } from '../data/StarterLevels';
 const { ccclass } = _decorator;
 
 interface CoachRuntime {
-  step: CoachStep;
-  /** Targets the player has successfully completed. */
+  technique: TechniqueId;
+  steps: CoachStep[];
+  stepIndex: number;
+  /** Targets completed on the current step. */
   done: Set<number>;
 }
 
@@ -86,15 +89,17 @@ export class GameController extends Component {
       },
       onSwipeBegin: () => {
         if (!this.session.canAcceptInput()) return;
-        if (this.coach && this.coach.step.action !== 'EXCLUDE') return;
+        const step = this.currentCoachStep();
+        if (this.coach && step?.action !== 'EXCLUDE') return;
         this.message = '';
         this.boardView.setPendingTap(null);
         this.session.beginSwipeExclude();
       },
       onSwipePaint: (i) => {
         if (this.coach) {
-          if (this.coach.step.action !== 'EXCLUDE') return;
-          if (!this.coach.step.targetCells.includes(i)) return;
+          const step = this.currentCoachStep();
+          if (!step || step.action !== 'EXCLUDE') return;
+          if (!step.targetCells.includes(i)) return;
           if (this.coach.done.has(i)) return;
         }
         this.session.paintSwipeExclude(i);
@@ -227,19 +232,33 @@ export class GameController extends Component {
     this.maybeStartTechniqueCoach(nextSnap.level.id);
   }
 
-  /** Interactive on-board coach at T1–T6 first teach levels. */
+  /** Interactive on-board coach at T1–T6 first teach levels (once per technique). */
   private maybeStartTechniqueCoach(levelId: number): void {
     this.clearCoach();
     const tech = techniqueGuideForLevel(levelId);
     if (!tech) return;
+    if (this.hasSeenTechniqueGuide(tech)) return;
     const level = this.levels.getById(levelId);
     if (!level) return;
-    const step = findCoachStep(level, tech);
-    if (!step || step.targetCells.length === 0) return;
-    this.coach = { step, done: new Set() };
+    const steps = findCoachLesson(level, tech).filter((s) => s.targetCells.length > 0);
+    if (steps.length === 0) return;
+    this.coach = { technique: tech, steps, stepIndex: 0, done: new Set() };
     this.techniqueGuide.setBoardFrame(this.boardView.getBoardFrameInParent());
-    this.techniqueGuide.show(step);
+    this.techniqueGuide.show(steps[0]!);
     this.refreshCoachSpotlight();
+  }
+
+  private hasSeenTechniqueGuide(tech: TechniqueId): boolean {
+    const seen = this.session.getSave().progress.seenTechniqueGuides ?? [];
+    return seen.includes(tech);
+  }
+
+  private markTechniqueGuideSeen(tech: TechniqueId): void {
+    const save = this.session.getSave();
+    const seen = save.progress.seenTechniqueGuides ?? [];
+    if (seen.includes(tech)) return;
+    save.progress.seenTechniqueGuides = [...seen, tech];
+    saveService.save(save);
   }
 
   private clearCoach(): void {
@@ -248,12 +267,18 @@ export class GameController extends Component {
     this.boardView?.setCoachSpotlight(null);
   }
 
+  private currentCoachStep(): CoachStep | null {
+    if (!this.coach) return null;
+    return this.coach.steps[this.coach.stepIndex] ?? null;
+  }
+
   private refreshCoachSpotlight(): void {
-    if (!this.coach) {
+    const step = this.currentCoachStep();
+    if (!this.coach || !step) {
       this.boardView.setCoachSpotlight(null);
       return;
     }
-    const { step, done } = this.coach;
+    const { done } = this.coach;
     const pending = step.targetCells.filter((i) => !done.has(i));
     this.boardView.setCoachSpotlight({
       focus: step.focusCells,
@@ -263,8 +288,9 @@ export class GameController extends Component {
   }
 
   private handleCoachTap(index: number): void {
-    if (!this.coach || this.coach.step.action !== 'EXCLUDE') return;
-    if (!this.coach.step.targetCells.includes(index)) return;
+    const step = this.currentCoachStep();
+    if (!this.coach || !step || step.action !== 'EXCLUDE') return;
+    if (!step.targetCells.includes(index)) return;
     if (this.coach.done.has(index)) return;
     this.boardView.setPendingTap(null);
     this.session.applyTap(index);
@@ -272,38 +298,54 @@ export class GameController extends Component {
   }
 
   private handleCoachDoubleTap(index: number): void {
-    if (!this.coach || this.coach.step.action !== 'PLACE_CAT') return;
-    if (!this.coach.step.targetCells.includes(index)) return;
+    const step = this.currentCoachStep();
+    if (!this.coach || !step || step.action !== 'PLACE_CAT') return;
+    if (!step.targetCells.includes(index)) return;
     this.boardView.setPendingTap(null);
     this.session.applyDoubleTap(index);
     this.syncCoachAfterBoard();
   }
 
-  /** Mark completed targets from current board; finish coach when all done. */
+  /** Mark completed targets; advance multi-step coach or finish. */
   private syncCoachAfterBoard(): void {
     if (!this.coach) return;
+    const step = this.currentCoachStep();
+    if (!step) return;
     const board = this.session.getSnapshot().board;
-    const { step, done } = this.coach;
+    const { done } = this.coach;
     for (const idx of step.targetCells) {
       if (done.has(idx)) continue;
       if (step.action === 'EXCLUDE' && board[idx] === 'EXCLUDED') done.add(idx);
       if (step.action === 'PLACE_CAT' && board[idx] === 'CAT') done.add(idx);
     }
-    if (step.targetCells.every((i) => done.has(i))) {
-      this.clearCoach();
-      this.message = '';
-      this.hud.render(this.session.getSnapshot(), this.message);
+    if (!step.targetCells.every((i) => done.has(i))) {
+      this.refreshCoachSpotlight();
       return;
     }
-    this.refreshCoachSpotlight();
+
+    // Advance to next step of the lesson, or finish and remember.
+    if (this.coach.stepIndex + 1 < this.coach.steps.length) {
+      this.coach.stepIndex += 1;
+      this.coach.done = new Set();
+      const next = this.coach.steps[this.coach.stepIndex]!;
+      this.techniqueGuide.show(next);
+      this.refreshCoachSpotlight();
+      return;
+    }
+
+    this.markTechniqueGuideSeen(this.coach.technique);
+    this.clearCoach();
+    this.message = '';
+    this.hud.render(this.session.getSnapshot(), this.message);
   }
 
-  /** Levels 1–2 show onboarding tips; coach levels keep tip empty (bubble owns copy). */
+  /** Levels 1–2 show onboarding tips; active coach levels leave tip empty (bubble owns copy). */
   private defaultTipFor(snap: SessionSnapshot): string {
     if (snap.noStamina || snap.levelFailed) return this.message;
     const id = snap.level.id;
     if (id === 1 || id === 2) return i18n.t(`tutorial.${id}`);
-    if (techniqueGuideForLevel(id)) return '';
+    const tech = techniqueGuideForLevel(id);
+    if (tech && !this.hasSeenTechniqueGuide(tech)) return '';
     const hasMarks = snap.board.some((c) => c !== 'EMPTY');
     if (!hasMarks) return i18n.t('board.tip_exclude');
     return '';

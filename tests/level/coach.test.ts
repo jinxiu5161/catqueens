@@ -7,9 +7,15 @@ import {
   techniqueGuideForLevel,
 } from '../../assets/scripts/core/level/LevelTechniques';
 import {
+  findCoachLesson,
   findCoachStep,
   nextCoachPointer,
+  scoreCoachLesson,
+  teachCoachMinScore,
 } from '../../assets/scripts/core/level/TechniqueCoach';
+import { createDefaultSave } from '../../assets/scripts/core/save/SaveTypes';
+import { SaveService } from '../../assets/scripts/core/save/SaveService';
+import { MemoryStorageAdapter } from '../../assets/scripts/core/save/StorageAdapter';
 
 const file = JSON.parse(
   readFileSync(join(process.cwd(), 'assets/resources/data/levels.json'), 'utf8'),
@@ -21,7 +27,6 @@ describe('interactive technique coach', () => {
     const step = findCoachStep(level, 'T1');
     expect(step).not.toBeNull();
     expect(step!.action).toBe('EXCLUDE');
-    // Teach board should clear multiple cells so the technique feels powerful
     expect(step!.targetCells.length).toBeGreaterThanOrEqual(2);
     expect(step!.focusCells.length).toBe(level.size);
     expect(step!.messageKey).toMatch(/^coach\.T1_/);
@@ -30,14 +35,27 @@ describe('interactive technique coach', () => {
     }
   });
 
-  it('builds coach steps for every technique guide level', () => {
+  it('builds satisfying coach lessons for every technique guide level', () => {
     for (const [tech, id] of Object.entries(TECHNIQUE_GUIDE_LEVEL)) {
       expect(techniqueGuideForLevel(id!)).toBe(tech);
       const level = file.levels.find((l) => l.id === id)!;
-      const step = findCoachStep(level, tech as 'T1');
-      expect(step, `coach for ${tech} @${id}`).not.toBeNull();
-      expect(step!.targetCells.length).toBeGreaterThan(0);
-      expect(step!.focusCells.length).toBeGreaterThan(0);
+      const steps = findCoachLesson(level, tech as 'T1');
+      expect(steps.length, `coach for ${tech} @${id}`).toBeGreaterThan(0);
+      expect(scoreCoachLesson(steps)).toBeGreaterThanOrEqual(teachCoachMinScore(tech as 'T1'));
+      for (const step of steps) {
+        expect(step.targetCells.length).toBeGreaterThan(0);
+        expect(step.focusCells.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('T3 teach is place then cascade exclude', () => {
+    const level = file.levels.find((l) => l.id === TECHNIQUE_GUIDE_LEVEL.T3)!;
+    const steps = findCoachLesson(level, 'T3');
+    expect(steps[0]?.action).toBe('PLACE_CAT');
+    if (steps.length > 1) {
+      expect(steps[1]?.action).toBe('EXCLUDE');
+      expect(steps[1]!.targetCells.length).toBeGreaterThanOrEqual(2);
     }
   });
 
@@ -45,5 +63,15 @@ describe('interactive technique coach', () => {
     expect(nextCoachPointer([4, 2, 9], new Set())).toBe(2);
     expect(nextCoachPointer([4, 2, 9], new Set([2]))).toBe(4);
     expect(nextCoachPointer([4, 2, 9], new Set([2, 4, 9]))).toBe(-1);
+  });
+
+  it('persists seenTechniqueGuides in save migrate/normalize', () => {
+    const storage = new MemoryStorageAdapter();
+    const svc = new SaveService(storage);
+    const save = createDefaultSave();
+    save.progress.seenTechniqueGuides = ['T1'];
+    svc.save(save);
+    const loaded = svc.load();
+    expect(loaded.progress.seenTechniqueGuides).toEqual(['T1']);
   });
 });

@@ -61,6 +61,13 @@ export class SaveService {
 
   normalize(data: SaveDataV1): SaveDataV1 {
     const next: SaveDataV1 = JSON.parse(JSON.stringify(data)) as SaveDataV1;
+    if (!Array.isArray(next.progress.seenTechniqueGuides)) {
+      next.progress.seenTechniqueGuides = [];
+    } else {
+      next.progress.seenTechniqueGuides = [
+        ...new Set(next.progress.seenTechniqueGuides.filter((x) => typeof x === 'string')),
+      ];
+    }
     next.economy.tickets = Math.max(0, Math.min(9, next.economy.tickets | 0));
     next.economy.pendingTicketRewards = Math.max(
       0,
