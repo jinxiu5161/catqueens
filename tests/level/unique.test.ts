@@ -17,27 +17,30 @@ describe('starter levels unique solution gate', () => {
     expect(Math.max(...file.levels.map((l) => l.size))).toBeLessThanOrEqual(10);
   });
 
-  it('early curriculum: T0 on 4×4, T1 teaches on 5×5, first 50 no-guess', () => {
-    for (let id = 1; id <= 4; id++) {
-      const level = file.levels.find((l) => l.id === id)!;
-      expect(level.size, `level ${id}`).toBe(4);
-      expect(level.technique).toBe('T0');
-      expect(level.noGuess, `level ${id}`).toBe(true);
-    }
-    expect(file.levels.find((l) => l.id === 5)!.size).toBe(5);
+  it('early curriculum: L1 T0, L2/L4 T1 guides on 5×5, L8–15 T2 on 5×5, first 50 no-guess', () => {
+    expect(file.levels.find((l) => l.id === 1)!.technique).toBe('T0');
+    expect(file.levels.find((l) => l.id === 1)!.size).toBe(4);
+    expect(file.levels.find((l) => l.id === 1)!.requiredTech).toBe(0);
+    expect(file.levels.find((l) => l.id === 2)!.size).toBe(5);
+    expect(file.levels.find((l) => l.id === 2)!.technique).toBe('T1');
+    expect(file.levels.find((l) => l.id === 2)!.requiredTech).toBe(1);
+    expect(file.levels.find((l) => l.id === 2)!.prePlaceCats?.length).toBe(1);
+    expect(file.levels.find((l) => l.id === 3)!.technique).toBe('T1');
+    expect(file.levels.find((l) => l.id === 4)!.size).toBe(5);
+    expect(file.levels.find((l) => l.id === 4)!.requiredTech).toBe(1);
+    expect(file.levels.find((l) => l.id === 4)!.prePlaceCats?.length).toBe(1);
     expect(file.levels.find((l) => l.id === 5)!.technique).toBe('T1');
+    expect(file.levels.find((l) => l.id === 8)!.technique).toBe('T2');
+    expect(file.levels.find((l) => l.id === 8)!.size).toBe(5);
     for (const id of [13, 14]) {
       const level = file.levels.find((l) => l.id === id)!;
       expect(level.size, `level ${id} stays 5×5`).toBe(5);
-      expect(level.technique).toBe('T1');
+      expect(level.technique).toBe('T2');
     }
-    // L5/L29 teach boards intentionally have no free singleton (technique unlocks first cat).
-    const early = file.levels.filter((l) => l.id <= 50 && l.id !== 5 && l.id !== 29);
-    for (const level of early) {
+    for (const level of file.levels.filter((l) => l.id <= 50)) {
       expect(level.noGuess, `level ${level.id} should be noGuess`).toBe(true);
     }
-    expect(file.levels.find((l) => l.id === 5)!.technique).toBe('T1');
-    expect(file.levels.find((l) => l.id === 29)!.technique).toBe('T2');
+    expect(file.levels.find((l) => l.id === 16)!.technique).toBe('T3');
   });
 
   it('no two levels share the same board (incl. region-id relabel)', () => {
@@ -61,11 +64,11 @@ describe('starter levels unique solution gate', () => {
     }
   });
 
-  it('consecutive 4×4 T0 levels alternate solution layouts', () => {
-    for (let id = 2; id <= 4; id++) {
+  it('consecutive same-size early levels alternate solution layouts', () => {
+    for (let id = 2; id <= 7; id++) {
       const a = file.levels.find((l) => l.id === id - 1)!;
       const b = file.levels.find((l) => l.id === id)!;
-      if (a.size !== 4 || b.size !== 4) continue;
+      if (a.size !== b.size) continue;
       const sa = [...a.solution!].sort((x, y) => x - y).join(',');
       const sb = [...b.solution!].sort((x, y) => x - y).join(',');
       expect(sb, `level ${id} should alternate solution vs ${id - 1}`).not.toBe(sa);

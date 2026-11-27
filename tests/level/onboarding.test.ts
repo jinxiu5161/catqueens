@@ -3,85 +3,73 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LevelsFile } from '../../assets/scripts/core/level/LevelDefinition';
 import { coachGuideKeyForLevel } from '../../assets/scripts/core/level/LevelTechniques';
-import {
-  findL3Lesson,
-  findLevelCoachPlan,
-  singletonSolutionCats,
-} from '../../assets/scripts/core/level/TechniqueCoach';
-import {
-  level2RowColChainOk,
-  level3AdjChainOk,
-  level5NeedsT1ForFirstCat,
-  level29NeedsT2ForFirstCat,
-} from '../../assets/scripts/core/level/OnboardingChain';
-import {
-  firstForcedPlacement,
-  isNoGuessLevel,
-} from '../../assets/scripts/core/level/LevelDifficulty';
+import { findLevelCoachPlan } from '../../assets/scripts/core/level/TechniqueCoach';
+import { annotateLevel } from '../../assets/scripts/core/level/TechSolver';
+import { isNoGuessLevel } from '../../assets/scripts/core/level/LevelDifficulty';
 
 const file = JSON.parse(
   readFileSync(join(process.cwd(), 'assets/resources/data/levels.json'), 'utf8'),
 ) as LevelsFile;
 
-describe('early onboarding levels 1–3', () => {
-  it('L1 has place-cat then row/col exclude coach', () => {
-    expect(coachGuideKeyForLevel(1)).toBe('L1');
+describe('early onboarding guides L1/L2/L4/L8', () => {
+  it('L1 is T0 guide with requiredTech 0', () => {
+    expect(coachGuideKeyForLevel(1)).toBe('T0');
     const level = file.levels.find((l) => l.id === 1)!;
-    expect(singletonSolutionCats(level).length).toBeGreaterThanOrEqual(2);
     expect(isNoGuessLevel(level).ok).toBe(true);
+    expect(annotateLevel(level).requiredTech).toBe(0);
+    expect(level.requiredTech).toBe(0);
     const plan = findLevelCoachPlan(level)!;
-    expect(plan.guideKey).toBe('L1');
-    expect(plan.steps).toHaveLength(2);
+    expect(plan.guideKey).toBe('T0');
     expect(plan.steps[0]?.action).toBe('PLACE_CAT');
-    expect(plan.steps[1]?.action).toBe('EXCLUDE');
-    expect(plan.steps[1]!.targetCells.length).toBeGreaterThanOrEqual(4);
+    expect(plan.steps[0]?.messageText).toBeTruthy();
   });
 
-  it('L2 needs row/col exclude after the first cat to reveal the next', () => {
-    expect(coachGuideKeyForLevel(2)).toBeNull();
+  it('L2 is T1a guide with prePlaceCats and EXCLUDE hint', () => {
+    expect(coachGuideKeyForLevel(2)).toBe('T1a');
     const level = file.levels.find((l) => l.id === 2)!;
-    expect(singletonSolutionCats(level)).toHaveLength(1);
-    expect(isNoGuessLevel(level).ok).toBe(true);
-    expect(level2RowColChainOk(level)).toBe(true);
-  });
-
-  it('L3 needs neighbor exclude to shrink another color to one open cell', () => {
-    expect(coachGuideKeyForLevel(3)).toBe('L3');
-    const level = file.levels.find((l) => l.id === 3)!;
-    expect(singletonSolutionCats(level)).toHaveLength(1);
-    expect(level3AdjChainOk(level)).toBe(true);
-    const { steps, prePlaceCats } = findL3Lesson(level);
-    expect(prePlaceCats).toHaveLength(1);
-    expect(steps).toHaveLength(1);
-    expect(steps[0]?.action).toBe('EXCLUDE');
-    expect(steps[0]!.targetCells.length).toBeGreaterThanOrEqual(3);
+    expect(level.size).toBe(5);
+    expect(level.prePlaceCats?.length).toBe(1);
+    expect(level.requiredTech).toBe(1);
+    expect(
+      annotateLevel(level, { t1Mode: 'a', initialCats: level.prePlaceCats }).requiredTech,
+    ).toBe(1);
     const plan = findLevelCoachPlan(level)!;
-    expect(plan.guideKey).toBe('L3');
-    expect(plan.prePlaceCats).toEqual(prePlaceCats);
-  });
-
-  it('L15 has no interactive technique coach', () => {
-    expect(coachGuideKeyForLevel(15)).toBeNull();
-    expect(findLevelCoachPlan(file.levels.find((l) => l.id === 15)!)).toBeNull();
-  });
-
-  it('L5 needs T1 exclude before the first cat is forced', () => {
-    const level = file.levels.find((l) => l.id === 5)!;
-    expect(coachGuideKeyForLevel(5)).toBe('T1');
-    expect(firstForcedPlacement(level)).toBeNull();
-    expect(level5NeedsT1ForFirstCat(level)).toBe(true);
-    const plan = findLevelCoachPlan(level)!;
+    expect(plan.guideKey).toBe('T1a');
+    expect(plan.prePlaceCats).toEqual(level.prePlaceCats);
     expect(plan.steps[0]?.action).toBe('EXCLUDE');
-    expect(plan.steps[0]!.targetCells.length).toBeGreaterThanOrEqual(2);
+    expect(plan.steps[0]!.targetCells.length).toBeGreaterThan(0);
   });
 
-  it('L29 needs T2 exclude before the first cat is forced', () => {
-    const level = file.levels.find((l) => l.id === 29)!;
-    expect(coachGuideKeyForLevel(29)).toBe('T2');
-    expect(firstForcedPlacement(level)).toBeNull();
-    expect(level29NeedsT2ForFirstCat(level)).toBe(true);
+  it('L4 is T1b guide with prePlaceCats', () => {
+    expect(coachGuideKeyForLevel(4)).toBe('T1b');
+    const level = file.levels.find((l) => l.id === 4)!;
+    expect(level.size).toBe(5);
+    expect(level.guide).toBe(true);
+    expect(level.prePlaceCats?.length).toBe(1);
+    expect(level.requiredTech).toBe(1);
     const plan = findLevelCoachPlan(level)!;
-    expect(plan.steps[0]?.regionIds?.length).toBeGreaterThanOrEqual(2);
+    expect(plan.guideKey).toBe('T1b');
+    expect(plan.prePlaceCats).toEqual(level.prePlaceCats);
+    expect(plan.steps[0]?.action).toBe('EXCLUDE');
+  });
+
+  it('L8 is T2 guide', () => {
+    expect(coachGuideKeyForLevel(8)).toBe('T2');
+    const level = file.levels.find((l) => l.id === 8);
+    if (!level) return;
+    expect(level.guide).toBe(true);
+    const plan = findLevelCoachPlan(level)!;
+    expect(plan.guideKey).toBe('T2');
+    expect(plan.steps[0]?.action).toBe('EXCLUDE');
+  });
+
+  it('L3/L5/L15 have no interactive technique coach', () => {
+    expect(coachGuideKeyForLevel(3)).toBeNull();
+    expect(coachGuideKeyForLevel(5)).toBeNull();
+    expect(coachGuideKeyForLevel(15)).toBeNull();
+    const l3 = file.levels.find((l) => l.id === 3);
+    const l15 = file.levels.find((l) => l.id === 15);
+    if (l3) expect(findLevelCoachPlan(l3)).toBeNull();
+    if (l15) expect(findLevelCoachPlan(l15)).toBeNull();
   });
 });
-

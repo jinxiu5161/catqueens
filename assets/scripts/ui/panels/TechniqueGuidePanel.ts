@@ -139,7 +139,8 @@ export class TechniqueGuidePanel extends Component {
       this.chipHost.setPosition(-230, 10, 0);
     }
 
-    this.bodyLabel.string = i18n.t(step.messageKey).replace(/\{region\}/g, '');
+    const raw = step.messageText ?? i18n.t(step.messageKey);
+    this.bodyLabel.string = raw.replace(/\{region\}/g, '');
 
     const top = this.boardFrame.y + this.boardFrame.size / 2;
     this.bubble.setPosition(0, top + 110, 0);

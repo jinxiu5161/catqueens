@@ -23,10 +23,24 @@ export interface LevelDefinition {
   /** True when solvable by forced moves only (no guessing). */
   noGuess?: boolean;
   elite?: boolean;
-  /** Primary curriculum technique T0–T6. */
-  technique?: 'T0' | 'T1' | 'T2' | 'T3' | 'T4' | 'T5' | 'T6';
+  /** Primary curriculum technique T0–T4. */
+  technique?: 'T0' | 'T1' | 'T2' | 'T3' | 'T4';
   /** Chinese short label for the technique. */
   techniqueLabel?: string;
+  /** Curriculum stage label, e.g. 入门 / 基础 / 进阶. */
+  stage?: string;
+  /** Highest stuck-progress technique id from TechSolver. */
+  requiredTech?: 0 | 1 | 2 | 3 | 4;
+  techCombo?: number[];
+  chainLength?: number;
+  branchDepth?: number;
+  /** Interactive on-board technique guide. */
+  guide?: boolean;
+  /** Practice (non-guide) slot. */
+  pure?: boolean;
+  hint?: import('../level/TechSolver').LevelHint | null;
+  /** Seed cats before a T1b adjacency guide. */
+  prePlaceCats?: number[];
 }
 
 export interface BoardValidation {

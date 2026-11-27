@@ -2,11 +2,7 @@ import type { LevelDefinition } from '../puzzle/PuzzleTypes';
 import { colOf, rowOf } from '../puzzle/PuzzleTypes';
 import { neighborIndexes } from '../puzzle/PuzzleRules';
 import { firstForcedPlacement } from './LevelDifficulty';
-import {
-  coachGuideKeyForLevel,
-  techniqueGuideForLevel,
-  type TechniqueId,
-} from './LevelTechniques';
+import { coachGuideKeyForLevel, type GuideKey, type TechniqueId } from './LevelTechniques';
 
 /** Player must exclude or place a cat on the guided cells. */
 export type CoachAction = 'EXCLUDE' | 'PLACE_CAT';
@@ -14,6 +10,7 @@ export type CoachAction = 'EXCLUDE' | 'PLACE_CAT';
 /**
  * One interactive board step: spotlight focus cells, require action on targets.
  * `messageKey` may contain `{region}` for an inline color chip.
+ * Prefer `messageText` when the level ships a pre-built Chinese hint.
  */
 export interface CoachStep {
   technique: TechniqueId;
@@ -26,6 +23,8 @@ export interface CoachStep {
   regionIds?: number[];
   axis?: 'row' | 'col';
   messageKey: string;
+  /** Pre-rendered Chinese copy from LevelDefinition.hint (skips i18n). */
+  messageText?: string;
 }
 
 const MAX_COACH_TARGETS = 4;
@@ -264,17 +263,15 @@ function focusAroundCell(level: LevelDefinition, index: number): number[] {
 }
 
 function pigeonMessageKey(technique: TechniqueId, axis: 'row' | 'col'): string {
-  if (technique === 'T4') return axis === 'row' ? 'coach.T4_row' : 'coach.T4_col';
-  if (technique === 'T5') return 'coach.T5';
-  if (technique === 'T6') return 'coach.T6_exclude';
+  if (technique === 'T3') return axis === 'row' ? 'coach.T2_row' : 'coach.T2_col';
+  if (technique === 'T2') return axis === 'row' ? 'coach.T1_row' : 'coach.T1_col';
   return axis === 'row' ? 'coach.T2_row' : 'coach.T2_col';
 }
 
 function findPlaceCatStep(level: LevelDefinition, technique: TechniqueId): CoachStep | null {
   const target = firstForcedPlacement(level);
   if (target == null) return null;
-  const messageKey =
-    technique === 'T6' ? 'coach.T6_place' : technique === 'T5' ? 'coach.T5' : 'coach.T3_place';
+  const messageKey = technique === 'T4' ? 'coach.T6_place' : 'coach.T3_place';
   return {
     technique,
     action: 'PLACE_CAT',
@@ -286,11 +283,10 @@ function findPlaceCatStep(level: LevelDefinition, technique: TechniqueId): Coach
 }
 
 /**
- * T3 teach: place a forced cat, then exclude the cascade band so the player
- * feels the “放一只，叉一片” payoff.
+ * Place a forced cat, then exclude the cascade band (“三重排除” / 连锁清空).
  */
-function findT3Lesson(level: LevelDefinition): CoachStep[] {
-  const place = findPlaceCatStep(level, 'T3');
+function findCascadeLesson(level: LevelDefinition, technique: TechniqueId = 'T1'): CoachStep[] {
+  const place = findPlaceCatStep(level, technique);
   if (!place) return [];
   const cat = place.targetCells[0]!;
   const size = level.size;
@@ -312,7 +308,7 @@ function findT3Lesson(level: LevelDefinition): CoachStep[] {
   const targets = capTargets([...cascade]);
   if (targets.length < 2) return [place];
   const excludeStep: CoachStep = {
-    technique: 'T3',
+    technique,
     action: 'EXCLUDE',
     focusCells: [...new Set([...place.focusCells, ...targets])],
     targetCells: targets,
@@ -354,7 +350,7 @@ function findDualCellExclude(level: LevelDefinition): CoachStep | null {
     // Exclude the wrong dual cell first; if the line also has foreign cells, clear a few.
     const targets = capTargets([wrong, ...extras]);
     const step: CoachStep = {
-      technique: 'T5',
+      technique: 'T3',
       action: 'EXCLUDE',
       focusCells: focus,
       targetCells: targets,
@@ -368,7 +364,7 @@ function findDualCellExclude(level: LevelDefinition): CoachStep | null {
       best = step;
     }
   }
-  return best ?? findPigeonExclude(level, 2, 'T5');
+  return best ?? findPigeonExclude(level, 2, 'T3');
 }
 
 /**
@@ -399,7 +395,7 @@ function findWhatIfExclude(level: LevelDefinition): CoachStep | null {
     }
     const targets = capTargets(wrongs);
     const step: CoachStep = {
-      technique: 'T6',
+      technique: 'T4',
       action: 'EXCLUDE',
       focusCells: [...focus],
       targetCells: targets,
@@ -413,7 +409,7 @@ function findWhatIfExclude(level: LevelDefinition): CoachStep | null {
       best = step;
     }
   }
-  return best ?? findPigeonExclude(level, 2, 'T6');
+  return best ?? findPigeonExclude(level, 2, 'T4');
 }
 
 /** Solution cats whose region is a single cell (instant “must place”). */
@@ -503,29 +499,88 @@ export function findL3Lesson(level: LevelDefinition): {
 }
 
 export interface LevelCoachPlan {
-  /** Save key (L1 / L3 / T1…). */
+  /** Save key (T0 / T1a / T1b / T2…). */
   guideKey: string;
   steps: CoachStep[];
-  /** Cats to place on an empty board before coaching (L3). */
+  /** Cats to place on an empty board before coaching (T1b). */
   prePlaceCats: number[];
 }
 
-/** Level-aware coach plan (early onboarding + T1–T6 teach). */
+function guideKeyToTechnique(key: GuideKey): TechniqueId {
+  if (key === 'T1a' || key === 'T1b') return 'T1';
+  return key;
+}
+
+/**
+ * Build interactive coach from level.hint when guide:true.
+ * Falls back to legacy demo helpers when hint is absent.
+ */
 export function findLevelCoachPlan(level: LevelDefinition): LevelCoachPlan | null {
   const guideKey = coachGuideKeyForLevel(level.id);
   if (!guideKey) return null;
-  if (level.id === 1) {
-    const steps = findL1Lesson(level);
-    return steps.length ? { guideKey, steps, prePlaceCats: [] } : null;
+
+  if (level.guide && level.hint) {
+    const hint = level.hint;
+    const technique = guideKeyToTechnique(guideKey);
+    const focus = [
+      ...new Set([...(hint.highlightCells ?? []), ...(hint.crossOutCells ?? [])]),
+    ].sort((a, b) => a - b);
+    const regionIds = (hint.highlightRegions ?? []).slice();
+    const steps: CoachStep[] = [];
+
+    if (hint.crossOutCells && hint.crossOutCells.length > 0) {
+      steps.push({
+        technique,
+        action: 'EXCLUDE',
+        focusCells: focus.length ? focus : hint.crossOutCells.slice(),
+        targetCells: hint.crossOutCells.slice(),
+        regionId: regionIds[0],
+        regionIds: regionIds.length ? regionIds : undefined,
+        messageKey: `coach.${guideKey}`,
+        messageText: hint.text,
+      });
+    } else {
+      const cell =
+        hint.pointerCell ??
+        (hint.highlightCells && hint.highlightCells.length > 0 ? hint.highlightCells[0]! : null);
+      if (cell == null) return null;
+      steps.push({
+        technique,
+        action: 'PLACE_CAT',
+        focusCells: hint.highlightCells?.length ? hint.highlightCells.slice() : [cell],
+        targetCells: [cell],
+        regionId: regionIds[0] ?? level.regions[cell],
+        regionIds: regionIds.length ? regionIds : undefined,
+        messageKey: `coach.${guideKey}`,
+        messageText: hint.text,
+      });
+    }
+
+    return {
+      guideKey,
+      steps,
+      prePlaceCats: level.prePlaceCats?.slice() ?? [],
+    };
   }
-  if (level.id === 3) {
-    const { steps, prePlaceCats } = findL3Lesson(level);
-    return steps.length ? { guideKey, steps, prePlaceCats } : null;
-  }
-  const tech = techniqueGuideForLevel(level.id);
+
+  // Legacy fallback for packs without embedded hints.
+  const tech = techniqueGuideFallback(guideKey);
   if (!tech) return null;
   const steps = findCoachLesson(level, tech);
-  return steps.length ? { guideKey, steps, prePlaceCats: [] } : null;
+  if (!steps.length) return null;
+  const pre =
+    guideKey === 'T1a' || guideKey === 'T1b'
+      ? level.prePlaceCats?.slice() ??
+        (guideKey === 'T1b' ? findL3Lesson(level).prePlaceCats : singletonSolutionCats(level).slice(0, 1))
+      : [];
+  return { guideKey, steps, prePlaceCats: pre };
+}
+
+function techniqueGuideFallback(key: GuideKey): TechniqueId | null {
+  if (key === 'T0') return 'T0';
+  if (key === 'T1a' || key === 'T1b') return 'T1';
+  if (key === 'T2' || key === 'T3' || key === 'T4') return key;
+  return null;
 }
 
 /**
@@ -540,39 +595,30 @@ export function findCoachStep(
   return lesson[0] ?? null;
 }
 
-/** Full coach script (T3 may be place → cascade exclude). */
+/** Demo helpers retained for tooling; UI coaches are off. */
 export function findCoachLesson(
   level: LevelDefinition,
   technique: TechniqueId,
 ): CoachStep[] {
   switch (technique) {
     case 'T0':
-      if (level.id === 1) return findL1Lesson(level);
-      if (level.id === 3) return findL3Lesson(level).steps;
       return [];
-    case 'T1': {
+    case 'T1':
+      // 三重排除 ≈ 放猫后的连锁清空演示
+      return findCascadeLesson(level, 'T1');
+    case 'T2': {
+      // 区域锁定
       const s = findLinePinExclude(level);
       return s ? [s] : [];
     }
-    case 'T2': {
-      const s = findPigeonExclude(level, 2, 'T2') ?? findLinePinExclude(level);
+    case 'T3': {
+      // 鸽巢锁定
+      const s = findPigeonExclude(level, 2, 'T3') ?? findLinePinExclude(level);
       return s ? [s] : [];
     }
-    case 'T3':
-      return findT3Lesson(level);
     case 'T4': {
-      const s =
-        findPigeonExclude(level, 3, 'T4') ??
-        findPigeonExclude(level, 2, 'T4') ??
-        findLinePinExclude(level);
-      return s ? [s] : [];
-    }
-    case 'T5': {
-      const s = findDualCellExclude(level) ?? findPlaceCatStep(level, 'T5');
-      return s ? [s] : [];
-    }
-    case 'T6': {
-      const s = findWhatIfExclude(level) ?? findPlaceCatStep(level, 'T6');
+      // 假设回溯
+      const s = findWhatIfExclude(level) ?? findPlaceCatStep(level, 'T4');
       return s ? [s] : [];
     }
     default:
@@ -595,21 +641,17 @@ export function scoreCoachLesson(steps: CoachStep[]): number {
   return score;
 }
 
-/** Minimum score for a teach board to feel “上手就好用”. */
+/** Minimum score for a teach board to feel “上手就好用” (unused while coaches off). */
 export function teachCoachMinScore(technique: TechniqueId): number {
   switch (technique) {
     case 'T1':
-      return 80; // ≥2 excludes
+      return 90;
     case 'T2':
       return 80;
     case 'T3':
-      return 90; // place (+ cascade when available)
+      return 80;
     case 'T4':
-      return 80;
-    case 'T5':
-      return 80;
-    case 'T6':
-      return 40; // at least one solid what-if exclude
+      return 40;
     default:
       return 40;
   }
