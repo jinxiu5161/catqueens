@@ -8,6 +8,10 @@ import {
   findLevelCoachPlan,
   singletonSolutionCats,
 } from '../../assets/scripts/core/level/TechniqueCoach';
+import {
+  level2RowColChainOk,
+  level3AdjChainOk,
+} from '../../assets/scripts/core/level/OnboardingChain';
 import { isNoGuessLevel } from '../../assets/scripts/core/level/LevelDifficulty';
 
 const file = JSON.parse(
@@ -28,16 +32,19 @@ describe('early onboarding levels 1–3', () => {
     expect(plan.steps[1]!.targetCells.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('L2 is a row/col practice board with singletons', () => {
+  it('L2 needs row/col exclude after the first cat to reveal the next', () => {
     expect(coachGuideKeyForLevel(2)).toBeNull();
     const level = file.levels.find((l) => l.id === 2)!;
-    expect(singletonSolutionCats(level).length).toBeGreaterThanOrEqual(2);
+    expect(singletonSolutionCats(level)).toHaveLength(1);
     expect(isNoGuessLevel(level).ok).toBe(true);
+    expect(level2RowColChainOk(level)).toBe(true);
   });
 
-  it('L3 pre-places a singleton and coaches neighbor excludes', () => {
+  it('L3 needs neighbor exclude after the shown cat to reveal the next', () => {
     expect(coachGuideKeyForLevel(3)).toBe('L3');
     const level = file.levels.find((l) => l.id === 3)!;
+    expect(singletonSolutionCats(level)).toHaveLength(1);
+    expect(level3AdjChainOk(level)).toBe(true);
     const { steps, prePlaceCats } = findL3Lesson(level);
     expect(prePlaceCats).toHaveLength(1);
     expect(steps).toHaveLength(1);

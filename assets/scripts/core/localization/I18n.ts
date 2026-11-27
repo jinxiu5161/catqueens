@@ -35,10 +35,10 @@ const ZH_CN: Record<string, string> = {
   'board.tip_exclude': '单击或滑动切换排除；再滑回已排除格会取消；滑过猫格不变；双击排除格可放猫',
   // Levels 1–2 onboarding — keep short so 4×4 does not feel repetitive
   'tutorial.1': '每行、每列、每个色区各放一只猫；猫不能相邻（含斜角）。',
-  'tutorial.2': '放猫后叉掉它的整行整列，再找下一只；单格色区可以直接放。',
+  'tutorial.2': '先放唯一的单格猫，再叉掉它的整行整列——下一只猫就会露出来。',
   'coach.L1_place': '这一格是单独色区——双击放上第一只小猫',
   'coach.L1_rowcol': '放好后，点击或滑动叉掉这一行和这一列的其他格子',
-  'coach.L3_adj': '这只猫已经放好了——滑动叉掉它周围的格子（不能挨着）',
+  'coach.L3_adj': '这只猫已经放好了——滑动叉掉周围格子后，下一只就会露出来',
   'technique.guide_title': '新技巧：{name}',
   'technique.ok': '明白了',
   'technique.T1':
