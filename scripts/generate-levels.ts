@@ -351,11 +351,12 @@ function tryMakeUnique(
 
 /**
  * Board size curve — max 10 for phones.
- * Only levels 1–2 stay on 4×4 as a short onboarding; then ramp quickly.
+ * 1–2: 4×4 guided tips; 3–7: more 4×4 practice (no tip spam);
+ * 8+: first 5×5 (same beat as before).
  */
 function sizeForLevel(id: number): number {
-  if (id <= 2) return 4; // 两关引导即可
-  if (id <= 16) return 5;
+  if (id <= 7) return 4;
+  if (id <= 22) return 5; // 第 8 关起五乘五
   if (id <= 70) return 6;
   if (id <= 160) return 7;
   if (id <= 300) return 8;
@@ -368,9 +369,10 @@ function requireNoGuess(id: number): boolean {
 }
 
 function singletonTargetFor(id: number, size: number): number {
-  if (id === 1) return size; // 几乎全是单格区，一眼能懂
-  if (id === 2) return Math.max(2, size - 1); // 稍收一点，仍无猜想
-  if (id <= 16) return Math.max(1, Math.floor(size / 2));
+  if (id === 1) return size; // 引导：几乎全是单格区
+  if (id === 2) return Math.max(2, size - 1);
+  if (id <= 7) return Math.max(1, Math.floor(size / 2)); // 4×4 练习，稍少白送
+  if (id <= 22) return Math.max(1, Math.floor(size / 2));
   if (id <= 40) return Math.max(1, Math.floor(size / 3));
   if (id <= 100) return Math.max(0, Math.floor(size / 4));
   if (size >= 10) return Math.max(3, Math.floor(size / 2));
@@ -421,9 +423,9 @@ function generateOne(id: number, seed: number): LevelDefinition | null {
     const rating = rateLevel(level);
     if (needNoGuess && !rating.noGuess) continue;
 
-    // Tutorial 1–2: keep stars at 入门
-    if (id <= 2) {
-      level.difficulty = 1;
+    // Early 4×4 stay 入门; guided tips only on 1–2 in UI
+    if (id <= 7) {
+      level.difficulty = id <= 2 ? 1 : Math.min(2, rating.stars);
       level.difficultyLabel = '入门';
     } else {
       level.difficulty = rating.stars;
@@ -487,16 +489,17 @@ function main(): void {
   }
 
   if (startId === 1) {
-    const tutorial = levels.filter((l) => l.id <= 2);
-    if (tutorial.some((l) => l.size !== 4 || !l.noGuess)) {
+    const four = levels.filter((l) => l.id <= 7);
+    if (four.some((l) => l.size !== 4 || !l.noGuess)) {
       console.error(
-        'Levels 1–2 must be 4×4 no-guess onboarding',
-        tutorial.map((l) => ({ id: l.id, size: l.size, noGuess: l.noGuess })),
+        'Levels 1–7 must be 4×4 no-guess',
+        four.map((l) => ({ id: l.id, size: l.size, noGuess: l.noGuess })),
       );
       process.exit(1);
     }
-    if (levels.some((l) => l.id >= 3 && l.id <= 16 && l.size !== 5)) {
-      console.error('Levels 3–16 should be 5×5');
+    const level8 = levels.find((l) => l.id === 8);
+    if (!level8 || level8.size !== 5) {
+      console.error('Level 8 must be 5×5', level8);
       process.exit(1);
     }
     const early = levels.filter((l) => l.id <= 40);
@@ -524,12 +527,11 @@ function main(): void {
         total: levels.length,
         range: [startId, count],
         noGuess: levels.filter((l) => l.noGuess).length,
-        tutorial1to2:
+        levels1to7_4x4:
           startId === 1
-            ? levels
-                .filter((l) => l.id <= 2)
-                .every((l) => l.size === 4 && l.noGuess)
+            ? levels.filter((l) => l.id <= 7).every((l) => l.size === 4 && l.noGuess)
             : undefined,
+        level8_5x5: startId === 1 ? levels.find((l) => l.id === 8)?.size === 5 : undefined,
         first40NoGuess:
           startId === 1 ? levels.filter((l) => l.id <= 40).every((l) => l.noGuess) : undefined,
         maxSize: Math.max(...levels.map((l) => l.size)),

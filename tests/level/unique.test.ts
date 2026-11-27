@@ -17,13 +17,14 @@ describe('starter levels unique solution gate', () => {
     expect(Math.max(...file.levels.map((l) => l.size))).toBeLessThanOrEqual(10);
   });
 
-  it('levels 1–2 are the only 4×4 onboarding; first 40 stay no-guess', () => {
-    for (const id of [1, 2]) {
+  it('levels 1–7 are 4×4; level 8 starts 5×5; first 40 stay no-guess', () => {
+    for (let id = 1; id <= 7; id++) {
       const level = file.levels.find((l) => l.id === id)!;
-      expect(level.size, `onboarding level ${id}`).toBe(4);
-      expect(level.noGuess, `onboarding level ${id}`).toBe(true);
+      expect(level.size, `level ${id}`).toBe(4);
+      expect(level.noGuess, `level ${id}`).toBe(true);
     }
-    expect(file.levels.filter((l) => l.size === 4).length).toBe(2);
+    expect(file.levels.find((l) => l.id === 8)!.size).toBe(5);
+    expect(file.levels.filter((l) => l.size === 4).length).toBe(7);
     const early = file.levels.filter((l) => l.id <= 40);
     expect(early.length).toBe(40);
     for (const level of early) {
