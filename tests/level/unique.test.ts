@@ -17,10 +17,15 @@ describe('starter levels unique solution gate', () => {
     expect(Math.max(...file.levels.map((l) => l.size))).toBeLessThanOrEqual(10);
   });
 
-  it('first 50 levels are no-guess for beginners', () => {
-    const first50 = file.levels.filter((l) => l.id <= 50);
-    expect(first50.length).toBe(50);
-    for (const level of first50) {
+  it('levels 1–8 are 4×4 tutorial; first 40 stay no-guess', () => {
+    for (let id = 1; id <= 8; id++) {
+      const level = file.levels.find((l) => l.id === id)!;
+      expect(level.size, `tutorial level ${id}`).toBe(4);
+      expect(level.noGuess, `tutorial level ${id}`).toBe(true);
+    }
+    const early = file.levels.filter((l) => l.id <= 40);
+    expect(early.length).toBe(40);
+    for (const level of early) {
       expect(level.noGuess, `level ${level.id} should be noGuess`).toBe(true);
     }
   });

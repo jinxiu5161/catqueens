@@ -124,10 +124,9 @@ export class GameController extends Component {
     const save = saveService.load();
     const startId = save.progress.currentLevelId || 1;
     const snap = this.session.start(this.levels.getById(startId) ? startId : 1, save);
-    const hasMarks = snap.board.some((c) => c !== 'EMPTY');
-    if (!hasMarks && !snap.noStamina && !snap.levelFailed) {
-      this.message = i18n.t('board.tip_exclude');
-    }
+    this.message = this.defaultTipFor(snap);
+    this.hud.render(snap, this.message);
+    this.failPanel.render(snap);
   }
 
   onDestroy(): void {
@@ -172,8 +171,20 @@ export class GameController extends Component {
     }
     this.boardView.setHintCells([]);
     this.actionBar.setApplyVisible(false);
-    this.message = '';
-    this.session.start(next, this.session.getSave());
+    const nextSnap = this.session.start(next, this.session.getSave());
+    this.message = this.defaultTipFor(nextSnap);
+    this.hud.render(nextSnap, this.message);
+    this.failPanel.render(nextSnap);
+  }
+
+  /** Levels 1–8 show rule tips; later empty boards get exclude gesture tip. */
+  private defaultTipFor(snap: SessionSnapshot): string {
+    if (snap.noStamina || snap.levelFailed) return this.message;
+    const id = snap.level.id;
+    if (id >= 1 && id <= 8) return i18n.t(`tutorial.${id}`);
+    const hasMarks = snap.board.some((c) => c !== 'EMPTY');
+    if (!hasMarks) return i18n.t('board.tip_exclude');
+    return '';
   }
 
   private onSession(snap: SessionSnapshot): void {
