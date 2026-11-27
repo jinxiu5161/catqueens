@@ -68,12 +68,32 @@ export function beginnerForcedCats(
     const cells = open.filter((i) => colOf(i, size) === c);
     if (cells.length === 1 && isLegalVsCats(level, cats, cells[0]!)) forced.add(cells[0]!);
   }
+  for (const cell of regionOpenSingletons(level, cats, excluded)) forced.add(cell);
+  return [...forced].sort((a, b) => a - b);
+}
+
+/**
+ * Color-region singletons among open cells — the most obvious “下一只猫” cue
+ * after exclude notes (matches how L1 teaches single-cell regions).
+ */
+export function regionOpenSingletons(
+  level: LevelDefinition,
+  cats: number[],
+  excluded: ReadonlySet<number>,
+): number[] {
+  const size = level.size;
+  const catSet = new Set(cats);
+  const open = openCells(level, catSet, excluded);
+  const regionHas = new Map<number, boolean>();
+  for (const cat of cats) regionHas.set(level.regions[cat]!, true);
+
+  const out: number[] = [];
   for (let rid = 0; rid < size; rid++) {
     if (regionHas.get(rid)) continue;
     const cells = open.filter((i) => level.regions[i] === rid);
-    if (cells.length === 1 && isLegalVsCats(level, cats, cells[0]!)) forced.add(cells[0]!);
+    if (cells.length === 1 && isLegalVsCats(level, cats, cells[0]!)) out.push(cells[0]!);
   }
-  return [...forced].sort((a, b) => a - b);
+  return out.sort((a, b) => a - b);
 }
 
 function rowColExcluded(level: LevelDefinition, cat: number): Set<number> {
@@ -115,26 +135,32 @@ export function level2RowColChainOk(level: LevelDefinition): boolean {
 }
 
 /**
- * L3: first singleton is shown; excluding its neighbors is what reveals the
- * next forced cat (not row/col clears alone).
+ * L3: first singleton is shown; excluding its 8-neighbors must shrink another
+ * color region to a single open cell (obvious second cat). Row/col clears alone
+ * must not already reveal it — adjacency is the lesson.
  */
 export function level3AdjChainOk(level: LevelDefinition): boolean {
   const singles = singletonSolutionCats(level);
-  if (singles.length < 1) return false;
+  if (singles.length !== 1) return false;
   const first = singles[0]!;
   const empty = new Set<number>();
-
-  // Prefer exactly one singleton so the pre-shown cat is unambiguous.
-  if (singles.length !== 1) return false;
-
-  const afterPlace = beginnerForcedCats(level, [first], empty);
-  if (afterPlace.length > 0) return false;
-
-  // Row/col exclude alone should NOT be enough — adjacency is the lesson.
-  const afterRowCol = beginnerForcedCats(level, [first], rowColExcluded(level, first));
-  if (afterRowCol.some((i) => i !== first)) return false;
-
-  const afterAdj = beginnerForcedCats(level, [first], adjExcluded(level, first));
   const solution = new Set(level.solution ?? []);
-  return afterAdj.some((i) => i !== first && solution.has(i));
+
+  // No extra obvious region after the pre-shown cat alone.
+  if (regionOpenSingletons(level, [first], empty).length > 0) return false;
+
+  // Row/col exclude of the first cat must NOT already create a region singleton.
+  const afterRowCol = regionOpenSingletons(level, [first], rowColExcluded(level, first));
+  if (afterRowCol.some((i) => solution.has(i))) return false;
+
+  // Neighbor excludes must leave exactly one open cell in some other region,
+  // and that cell must be a solution cat (legal vs the first cat).
+  const afterAdj = regionOpenSingletons(level, [first], adjExcluded(level, first));
+  const unlocked = afterAdj.filter((i) => i !== first && solution.has(i));
+  if (unlocked.length < 1) return false;
+
+  // Still obvious if the player also marks row/col afterwards.
+  const both = new Set([...adjExcluded(level, first), ...rowColExcluded(level, first)]);
+  const afterBoth = regionOpenSingletons(level, [first], both);
+  return afterBoth.some((i) => unlocked.includes(i));
 }

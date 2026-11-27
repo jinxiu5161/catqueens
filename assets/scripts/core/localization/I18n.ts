@@ -38,7 +38,7 @@ const ZH_CN: Record<string, string> = {
   'tutorial.2': '先放唯一的单格猫，再叉掉它的整行整列——下一只猫就会露出来。',
   'coach.L1_place': '这一格是单独色区——双击放上第一只小猫',
   'coach.L1_rowcol': '放好后，点击或滑动叉掉这一行和这一列的其他格子',
-  'coach.L3_adj': '这只猫已经放好了——滑动叉掉周围格子后，下一只就会露出来',
+  'coach.L3_adj': '这只猫已经放好了——滑动叉掉周围格子，会逼出一个只剩一格的色区',
   'technique.guide_title': '新技巧：{name}',
   'technique.ok': '明白了',
   'technique.T1':

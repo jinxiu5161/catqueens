@@ -40,7 +40,7 @@ describe('early onboarding levels 1–3', () => {
     expect(level2RowColChainOk(level)).toBe(true);
   });
 
-  it('L3 needs neighbor exclude after the shown cat to reveal the next', () => {
+  it('L3 needs neighbor exclude to shrink another color to one open cell', () => {
     expect(coachGuideKeyForLevel(3)).toBe('L3');
     const level = file.levels.find((l) => l.id === 3)!;
     expect(singletonSolutionCats(level)).toHaveLength(1);
@@ -55,3 +55,4 @@ describe('early onboarding levels 1–3', () => {
     expect(plan.prePlaceCats).toEqual(prePlaceCats);
   });
 });
+
