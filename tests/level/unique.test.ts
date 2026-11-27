@@ -17,33 +17,18 @@ describe('starter levels unique solution gate', () => {
     expect(Math.max(...file.levels.map((l) => l.size))).toBeLessThanOrEqual(10);
   });
 
-  it('levels 1–7 are 4×4; level 8 starts 5×5; first 40 stay no-guess', () => {
-    for (let id = 1; id <= 7; id++) {
+  it('early curriculum: T0 on 4×4, T1 teaches on 5×5, first 50 no-guess', () => {
+    for (let id = 1; id <= 4; id++) {
       const level = file.levels.find((l) => l.id === id)!;
       expect(level.size, `level ${id}`).toBe(4);
+      expect(level.technique).toBe('T0');
       expect(level.noGuess, `level ${id}`).toBe(true);
     }
-    expect(file.levels.find((l) => l.id === 8)!.size).toBe(5);
-    expect(file.levels.filter((l) => l.size === 4).length).toBe(7);
-    const early = file.levels.filter((l) => l.id <= 40);
-    expect(early.length).toBe(40);
+    expect(file.levels.find((l) => l.id === 5)!.size).toBe(5);
+    expect(file.levels.find((l) => l.id === 5)!.technique).toBe('T1');
+    const early = file.levels.filter((l) => l.id <= 50);
     for (const level of early) {
       expect(level.noGuess, `level ${level.id} should be noGuess`).toBe(true);
-    }
-  });
-
-  it('within each size stage, singleton regions never increase', async () => {
-    const { countSingletonRegions } = await import(
-      '../../assets/scripts/core/level/LevelDifficulty'
-    );
-    for (let i = 1; i < file.levels.length; i++) {
-      const a = file.levels[i - 1]!;
-      const b = file.levels[i]!;
-      if (a.size !== b.size) continue;
-      expect(
-        countSingletonRegions(b),
-        `level ${b.id} singletons rose vs ${a.id}`,
-      ).toBeLessThanOrEqual(countSingletonRegions(a));
     }
   });
 
@@ -68,13 +53,13 @@ describe('starter levels unique solution gate', () => {
     }
   });
 
-  it('consecutive early levels do not reuse the same solution when avoidable', () => {
-    // 4×4 only has 2 layouts — require alternation between neighbors
-    for (let id = 2; id <= 7; id++) {
+  it('consecutive 4×4 T0 levels alternate solution layouts', () => {
+    for (let id = 2; id <= 4; id++) {
       const a = file.levels.find((l) => l.id === id - 1)!;
       const b = file.levels.find((l) => l.id === id)!;
-      const sa = [...a.solution].sort((x, y) => x - y).join(',');
-      const sb = [...b.solution].sort((x, y) => x - y).join(',');
+      if (a.size !== 4 || b.size !== 4) continue;
+      const sa = [...a.solution!].sort((x, y) => x - y).join(',');
+      const sb = [...b.solution!].sort((x, y) => x - y).join(',');
       expect(sb, `level ${id} should alternate solution vs ${id - 1}`).not.toBe(sa);
     }
   });

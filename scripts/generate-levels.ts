@@ -1,23 +1,24 @@
 /**
- * Offline level generator for Cat Queens.
+ * Offline level generator — technique curriculum T0–T6.
  * Run: npm run generate:levels
  * Optional: LEVEL_COUNT=500 npm run generate:levels
  *
- * Rules:
- * - Max board size 10×10 (phone-friendly)
- * - Levels 1–50 must be no-guess (deterministic forced moves only)
- * - Every level unique-solvable + difficulty stars/tier
+ * Design: teach → practice, board size may dip when a new technique is introduced.
+ * Max board 10×10.
  */
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LevelDefinition } from '../assets/scripts/core/puzzle/PuzzleTypes';
 import { verifyAllLevels } from '../assets/scripts/core/level/LevelQuality';
+import { countSingletonRegions, rateLevel } from '../assets/scripts/core/level/LevelDifficulty';
 import {
-  countSingletonRegions,
-  levelHardness,
-  rateLevel,
-} from '../assets/scripts/core/level/LevelDifficulty';
+  TECHNIQUE_LABELS,
+  analyzeTechniques,
+  curriculumFor,
+  type Lesson,
+  type TechniqueId,
+} from '../assets/scripts/core/level/LevelTechniques';
 import { puzzleSolver } from '../assets/scripts/core/puzzle/PuzzleSolver';
 import { puzzleValidator } from '../assets/scripts/core/puzzle/PuzzleValidator';
 import { neighborIndexes, regionsAreFourConnected } from '../assets/scripts/core/puzzle/PuzzleRules';
@@ -45,7 +46,7 @@ function shuffle<T>(arr: T[], rand: () => number): T[] {
   return a;
 }
 
-function placeSolution(size: number, rand: () => number): number[] | null {
+export function placeSolution(size: number, rand: () => number): number[] | null {
   const rowUsed = Array.from({ length: size }, () => false);
   const colUsed = Array.from({ length: size }, () => false);
   const cats: number[] = [];
@@ -81,117 +82,6 @@ function placeSolution(size: number, rand: () => number): number[] | null {
   };
 
   return dfs(0) ? [...cats] : null;
-}
-
-/** Classic Voronoi regions around solution seeds. */
-function voronoiRegions(size: number, solution: number[], rand: () => number): number[] | null {
-  const regions = Array.from({ length: size * size }, () => -1);
-  for (let i = 0; i < size; i++) regions[solution[i]!] = i;
-
-  for (let idx = 0; idx < size * size; idx++) {
-    if (regions[idx]! >= 0) continue;
-    const r = rowOf(idx, size);
-    const c = colOf(idx, size);
-    let best: number[] = [];
-    let bestD = 1e9;
-    for (let i = 0; i < size; i++) {
-      const s = solution[i]!;
-      const d = Math.abs(rowOf(s, size) - r) + Math.abs(colOf(s, size) - c);
-      if (d < bestD) {
-        bestD = d;
-        best = [i];
-      } else if (d === bestD) best.push(i);
-    }
-    regions[idx] = best[Math.floor(rand() * best.length)]!;
-  }
-
-  return repairConnectivity(size, solution, regions, rand);
-}
-
-/**
- * Easy-pack regions: keep several size-1 regions (instant forced cats) so
- * beginners can solve without guessing.
- */
-function easyRegions(
-  size: number,
-  solution: number[],
-  rand: () => number,
-  singletonTarget: number,
-): number[] | null {
-  const regions = Array.from({ length: size * size }, () => -1);
-  for (let i = 0; i < size; i++) regions[solution[i]!] = i;
-
-  const order = shuffle(
-    Array.from({ length: size }, (_, i) => i),
-    rand,
-  );
-  const lockedSingletons = new Set(order.slice(0, Math.min(singletonTarget, size)));
-  const growers = order.filter((i) => !lockedSingletons.has(i));
-  if (growers.length === 0) growers.push(order[0]!);
-
-  // Fill empty cells by expanding grower regions (4-neighbor)
-  const frontier: number[] = [];
-  for (const rid of growers) frontier.push(solution[rid]!);
-
-  let guard = size * size * 4;
-  while (regions.some((r) => r < 0) && guard-- > 0) {
-    if (frontier.length === 0) {
-      // Restart frontier from any grower-owned cell
-      for (let i = 0; i < regions.length; i++) {
-        if (growers.includes(regions[i]!)) frontier.push(i);
-      }
-      if (frontier.length === 0) break;
-    }
-    const cur = frontier[Math.floor(rand() * frontier.length)]!;
-    const r = rowOf(cur, size);
-    const c = colOf(cur, size);
-    const rid = regions[cur]!;
-    const neigh = shuffle(
-      (
-        [
-          [-1, 0],
-          [1, 0],
-          [0, -1],
-          [0, 1],
-        ] as const
-      ).map(([dr, dc]) => [r + dr, c + dc] as const),
-      rand,
-    );
-    let expanded = false;
-    for (const [nr, nc] of neigh) {
-      if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
-      const n = nr * size + nc;
-      if (regions[n]! >= 0) continue;
-      regions[n] = rid;
-      frontier.push(n);
-      expanded = true;
-      break;
-    }
-    if (!expanded) {
-      const idx = frontier.indexOf(cur);
-      if (idx >= 0) frontier.splice(idx, 1);
-    }
-  }
-
-  // Any leftover empty → nearest grower seed
-  for (let idx = 0; idx < regions.length; idx++) {
-    if (regions[idx]! >= 0) continue;
-    const r = rowOf(idx, size);
-    const c = colOf(idx, size);
-    let best = growers[0]!;
-    let bestD = 1e9;
-    for (const rid of growers) {
-      const s = solution[rid]!;
-      const d = Math.abs(rowOf(s, size) - r) + Math.abs(colOf(s, size) - c);
-      if (d < bestD) {
-        bestD = d;
-        best = rid;
-      }
-    }
-    regions[idx] = best;
-  }
-
-  return repairConnectivity(size, solution, regions, rand);
 }
 
 function repairConnectivity(
@@ -258,12 +148,279 @@ function repairConnectivity(
   return regionsAreFourConnected({ id: 1, size, regions }) ? regions : null;
 }
 
+function voronoiRegions(size: number, solution: number[], rand: () => number): number[] | null {
+  const regions = Array.from({ length: size * size }, () => -1);
+  for (let i = 0; i < size; i++) regions[solution[i]!] = i;
+  for (let idx = 0; idx < size * size; idx++) {
+    if (regions[idx]! >= 0) continue;
+    const r = rowOf(idx, size);
+    const c = colOf(idx, size);
+    let best: number[] = [];
+    let bestD = 1e9;
+    for (let i = 0; i < size; i++) {
+      const s = solution[i]!;
+      const d = Math.abs(rowOf(s, size) - r) + Math.abs(colOf(s, size) - c);
+      if (d < bestD) {
+        bestD = d;
+        best = [i];
+      } else if (d === bestD) best.push(i);
+    }
+    regions[idx] = best[Math.floor(rand() * best.length)]!;
+  }
+  return repairConnectivity(size, solution, regions, rand);
+}
+
+function easyRegions(
+  size: number,
+  solution: number[],
+  rand: () => number,
+  singletonTarget: number,
+): number[] | null {
+  const regions = Array.from({ length: size * size }, () => -1);
+  for (let i = 0; i < size; i++) regions[solution[i]!] = i;
+
+  const order = shuffle(
+    Array.from({ length: size }, (_, i) => i),
+    rand,
+  );
+  const lockedSingletons = new Set(order.slice(0, Math.min(singletonTarget, size)));
+  const growers = order.filter((i) => !lockedSingletons.has(i));
+  if (growers.length === 0) growers.push(order[0]!);
+
+  const frontier: number[] = [];
+  for (const rid of growers) frontier.push(solution[rid]!);
+
+  let guard = size * size * 4;
+  while (regions.some((r) => r < 0) && guard-- > 0) {
+    if (frontier.length === 0) {
+      for (let i = 0; i < regions.length; i++) {
+        if (growers.includes(regions[i]!)) frontier.push(i);
+      }
+      if (frontier.length === 0) break;
+    }
+    const cur = frontier[Math.floor(rand() * frontier.length)]!;
+    const r = rowOf(cur, size);
+    const c = colOf(cur, size);
+    const rid = regions[cur]!;
+    const neigh = shuffle(
+      (
+        [
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1],
+        ] as const
+      ).map(([dr, dc]) => [r + dr, c + dc] as const),
+      rand,
+    );
+    let expanded = false;
+    for (const [nr, nc] of neigh) {
+      if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
+      const n = nr * size + nc;
+      if (regions[n]! >= 0) continue;
+      regions[n] = rid;
+      frontier.push(n);
+      expanded = true;
+      break;
+    }
+    if (!expanded) {
+      const idx = frontier.indexOf(cur);
+      if (idx >= 0) frontier.splice(idx, 1);
+    }
+  }
+
+  for (let idx = 0; idx < regions.length; idx++) {
+    if (regions[idx]! >= 0) continue;
+    const r = rowOf(idx, size);
+    const c = colOf(idx, size);
+    let best = growers[0]!;
+    let bestD = 1e9;
+    for (const rid of growers) {
+      const s = solution[rid]!;
+      const d = Math.abs(rowOf(s, size) - r) + Math.abs(colOf(s, size) - c);
+      if (d < bestD) {
+        bestD = d;
+        best = rid;
+      }
+    }
+    regions[idx] = best;
+  }
+
+  return repairConnectivity(size, solution, regions, rand);
+}
+
+/** T1: force one region into a 2–3 cell strip on one row or column. */
+function linePinRegions(
+  size: number,
+  solution: number[],
+  rand: () => number,
+  along: 'row' | 'col',
+): number[] | null {
+  const rid = Math.floor(rand() * size);
+  const seed = solution[rid]!;
+  const sr = rowOf(seed, size);
+  const sc = colOf(seed, size);
+  const strip: number[] = [seed];
+  const deltas = shuffle([-1, 1, -2, 2], rand);
+  for (const d of deltas) {
+    if (strip.length >= 3) break;
+    const nr = along === 'row' ? sr : sr + d;
+    const nc = along === 'row' ? sc + d : sc;
+    if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
+    const idx = nr * size + nc;
+    if (solution.includes(idx) && idx !== seed) continue;
+    strip.push(idx);
+  }
+  if (strip.length < 2) return null;
+
+  const regions = Array.from({ length: size * size }, () => -1);
+  for (let i = 0; i < size; i++) regions[solution[i]!] = i;
+  for (const cell of strip) regions[cell] = rid;
+
+  // Grow everyone except keep strip cells locked to rid
+  const locked = new Set(strip);
+  const base = voronoiRegions(size, solution, rand);
+  if (!base) return null;
+  for (let i = 0; i < regions.length; i++) {
+    if (locked.has(i)) continue;
+    regions[i] = base[i]!;
+  }
+  for (const cell of strip) regions[cell] = rid;
+  return repairConnectivity(size, solution, regions, rand);
+}
+
+/**
+ * T2/T4: k regions whose cats sit in k lines are confined to those k lines.
+ */
+export function pigeonholeRegions(
+  size: number,
+  solution: number[],
+  rand: () => number,
+  k: number,
+  axis: 'row' | 'col',
+): number[] | null {
+  if (k < 2 || k > size) return null;
+  const lines = shuffle(
+    Array.from({ length: size }, (_, i) => i),
+    rand,
+  ).slice(0, k);
+  const lineSet = new Set(lines);
+
+  const pigeonRids: number[] = [];
+  for (let rid = 0; rid < size; rid++) {
+    const cell = solution[rid]!;
+    const line = axis === 'col' ? colOf(cell, size) : rowOf(cell, size);
+    if (lineSet.has(line)) pigeonRids.push(rid);
+  }
+  if (pigeonRids.length !== k) return null;
+  const otherRids = Array.from({ length: size }, (_, i) => i).filter((r) => !pigeonRids.includes(r));
+
+  const regions = Array.from({ length: size * size }, () => -1);
+  for (let i = 0; i < size; i++) regions[solution[i]!] = i;
+
+  const inPigeonBand = (idx: number) => {
+    const line = axis === 'col' ? colOf(idx, size) : rowOf(idx, size);
+    return lineSet.has(line);
+  };
+
+  for (let idx = 0; idx < size * size; idx++) {
+    if (regions[idx]! >= 0) continue;
+    const r = rowOf(idx, size);
+    const c = colOf(idx, size);
+    const pool = inPigeonBand(idx) ? pigeonRids : otherRids;
+    if (!pool.length) return null;
+    let best: number[] = [];
+    let bestD = 1e9;
+    for (const rid of pool) {
+      const s = solution[rid]!;
+      const d = Math.abs(rowOf(s, size) - r) + Math.abs(colOf(s, size) - c);
+      if (d < bestD) {
+        bestD = d;
+        best = [rid];
+      } else if (d === bestD) best.push(rid);
+    }
+    regions[idx] = best[Math.floor(rand() * best.length)]!;
+  }
+
+  // Enforce confinement: pigeon regions cannot own cells outside the band
+  for (let idx = 0; idx < size * size; idx++) {
+    const rid = regions[idx]!;
+    if (pigeonRids.includes(rid) && !inPigeonBand(idx)) {
+      if (!otherRids.length) return null;
+      regions[idx] = otherRids[Math.floor(rand() * otherRids.length)]!;
+    }
+    if (otherRids.includes(rid) && inPigeonBand(idx)) {
+      // leave to repair / voronoi among pigeon — reassign to nearest pigeon
+      let best = pigeonRids[0]!;
+      let bestD = 1e9;
+      const r = rowOf(idx, size);
+      const c = colOf(idx, size);
+      for (const prid of pigeonRids) {
+        const s = solution[prid]!;
+        const d = Math.abs(rowOf(s, size) - r) + Math.abs(colOf(s, size) - c);
+        if (d < bestD) {
+          bestD = d;
+          best = prid;
+        }
+      }
+      regions[idx] = best;
+    }
+  }
+
+  return repairConnectivity(size, solution, regions, rand);
+}
+
+/** T5 proxy: at least two size-2 line-pinned regions, no singletons. */
+function dualPairRegions(size: number, solution: number[], rand: () => number): number[] | null {
+  const along: 'row' | 'col' = rand() < 0.5 ? 'row' : 'col';
+  let regions = linePinRegions(size, solution, rand, along);
+  if (!regions) return null;
+  // Try pinning a second region
+  const second = linePinRegions(size, solution, rand, along === 'row' ? 'col' : 'row');
+  if (second) {
+    // Merge: keep second's strip cells for its rid where not conflicting seeds
+    const counts = new Map<number, number>();
+    for (const rid of second) counts.set(rid, (counts.get(rid) ?? 0) + 1);
+    // Prefer second board if it already has line pins
+    regions = second;
+  }
+  // Strip singletons by growing them into neighbors
+  const by: number[][] = Array.from({ length: size }, () => []);
+  for (let i = 0; i < regions.length; i++) by[regions[i]!]!.push(i);
+  for (let rid = 0; rid < size; rid++) {
+    if (by[rid]!.length !== 1) continue;
+    const cell = by[rid]![0]!;
+    const r = rowOf(cell, size);
+    const c = colOf(cell, size);
+    for (const [dr, dc] of shuffle(
+      [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1],
+      ] as const,
+      rand,
+    )) {
+      const nr = r + dr;
+      const nc = c + dc;
+      if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
+      const n = nr * size + nc;
+      if (solution.includes(n)) continue;
+      const other = regions[n]!;
+      if (by[other]!.length <= 2) continue;
+      regions[n] = rid;
+      break;
+    }
+  }
+  return repairConnectivity(size, solution, regions, rand);
+}
+
 function solveTimeoutMs(size: number): number {
   if (size <= 6) return 800;
   if (size <= 7) return 1200;
   if (size <= 8) return 1600;
   if (size <= 9) return 2000;
-  return 2200; // fail fast; outer retries vary the seed instead
+  return 2200;
 }
 
 function regionCandidatesForCell(
@@ -293,11 +450,13 @@ function tryMakeUnique(
   solution: number[],
   regions: number[],
   rand: () => number,
+  allowAssign?: (cell: number, rid: number) => boolean,
 ): number[] | null {
   let cur = [...regions];
   const s1 = new Set(solution);
   const timeoutMs = solveTimeoutMs(size);
   const maxAttempts = size >= 9 ? 28 : size >= 8 ? 36 : 50;
+  const okAssign = (cell: number, rid: number) => (allowAssign ? allowAssign(cell, rid) : true);
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const level: LevelDefinition = {
@@ -312,14 +471,14 @@ function tryMakeUnique(
     if (u.status === 'TIMEOUT' || u.status === 'ZERO') return null;
     if (u.status !== 'MANY' || u.solutions.length < 2) return null;
 
-    const alt =
-      u.solutions.find((sol) => sol.some((c) => !s1.has(c))) ?? u.solutions[1]!;
+    const alt = u.solutions.find((sol) => sol.some((c) => !s1.has(c))) ?? u.solutions[1]!;
     const next = [...cur];
     let changed = false;
-    // Claim every alt-only cell in one pass (faster uniqueness pressure)
     for (const cell of shuffle([...alt], rand)) {
       if (s1.has(cell)) continue;
-      const candidates = regionCandidatesForCell(size, solution, next, cell);
+      const candidates = regionCandidatesForCell(size, solution, next, cell).filter((rid) =>
+        okAssign(cell, rid),
+      );
       if (!candidates.length) continue;
       const pick = candidates[Math.floor(rand() * candidates.length)]!;
       if (next[cell] !== pick) {
@@ -331,7 +490,6 @@ function tryMakeUnique(
       cur = next;
       continue;
     }
-    // Fallback: mutate a random non-solution boundary cell
     const idx = Math.floor(rand() * size * size);
     if (!s1.has(idx)) {
       const candidates = regionCandidatesForCell(size, solution, cur, idx);
@@ -353,70 +511,14 @@ function tryMakeUnique(
   return u.status === 'ONE' ? cur : null;
 }
 
-/**
- * Board size curve — max 10 for phones.
- * 1–2: 4×4 guided tips; 3–7: more 4×4 practice (no tip spam);
- * 8+: first 5×5 (same beat as before).
- */
-function sizeForLevel(id: number): number {
-  if (id <= 7) return 4;
-  if (id <= 22) return 5; // 第 8 关起五乘五
-  if (id <= 70) return 6;
-  if (id <= 160) return 7;
-  if (id <= 300) return 8;
-  if (id <= 420) return 9;
-  return 10;
-}
-
-function requireNoGuess(id: number): boolean {
-  return id <= 40;
-}
-
-/** Inclusive id range for a board-size stage. */
-function stageRangeForSize(size: number): { start: number; end: number } {
-  const ranges: Record<number, { start: number; end: number }> = {
-    4: { start: 1, end: 7 },
-    5: { start: 8, end: 22 },
-    6: { start: 23, end: 70 },
-    7: { start: 71, end: 160 },
-    8: { start: 161, end: 300 },
-    9: { start: 301, end: 420 },
-    10: { start: 421, end: 500 },
-  };
-  return ranges[size] ?? { start: 1, end: 500 };
-}
-
-/**
- * Within each size stage, singleton target decreases from high → low as id grows.
- */
-function singletonTargetFor(id: number, size: number): number {
-  const { start, end } = stageRangeForSize(size);
-  const span = Math.max(1, end - start);
-  const t = Math.min(1, Math.max(0, (id - start) / span));
-  // Stage start: many freebies; stage end: fewer — never force S=0 on large boards
-  // (0-singleton unique packs are extremely slow above 7×7).
-  const maxS = size <= 5 ? size : Math.max(3, Math.floor(size * 0.65));
-  const minS = singletonFloor(size);
-  return Math.max(minS, Math.round(maxS - t * (maxS - minS)));
-}
-
-function singletonFloor(size: number): number {
-  if (size <= 5) return 1;
-  if (size <= 7) return 1;
-  if (size <= 8) return 2;
-  if (size <= 9) return 3;
-  return 4; // 10×10: keep enough singletons for tractable uniqueness
-}
-
 function boardFingerprint(level: LevelDefinition): string {
-  return `${level.size}|R:${level.regions.join(',')}|S:${level.solution.join(',')}`;
+  return `${level.size}|R:${level.regions.join(',')}|S:${level.solution!.join(',')}`;
 }
 
 function solutionFingerprint(level: LevelDefinition): string {
-  return `${level.size}|${[...level.solution].sort((a, b) => a - b).join(',')}`;
+  return `${level.size}|${[...level.solution!].sort((a, b) => a - b).join(',')}`;
 }
 
-/** Relabel region ids by first-seen order so color-id swaps still match. */
 function canonicalBoardFingerprint(level: LevelDefinition): string {
   const map = new Map<number, number>();
   let next = 0;
@@ -428,51 +530,108 @@ function canonicalBoardFingerprint(level: LevelDefinition): string {
     }
     return mapped;
   });
-  return `${level.size}|R:${canon.join(',')}|S:${[...level.solution].sort((a, b) => a - b).join(',')}`;
+  return `${level.size}|R:${canon.join(',')}|S:${[...level.solution!].sort((a, b) => a - b).join(',')}`;
+}
+
+function matchesLesson(level: LevelDefinition, lesson: Lesson, soft = false): boolean {
+  const flags = analyzeTechniques(level);
+  const singles = flags.singletonCount;
+  if (singles < lesson.minSingles || singles > lesson.maxSingles) return false;
+  if (lesson.requireNoGuess && !flags.noGuess) return false;
+  // T6 must actually need guessing; other techniques may be guess or no-guess
+  if (lesson.technique === 'T6' && flags.noGuess && !soft) return false;
+  if (lesson.requireLinePin && !flags.hasLinePin) return false;
+  if (lesson.requirePigeonhole === 2) {
+    if (!soft && !(flags.hasPigeonhole2 || flags.hasLinePin)) return false;
+  }
+  if (lesson.requirePigeonhole === 3) {
+    // k=3 is scarce after uniquify; accept k=2 / line-pin; soft = any noGuess in range
+    if (!soft && !(flags.hasPigeonhole3 || flags.hasPigeonhole2 || flags.hasLinePin)) return false;
+  }
+  if (lesson.preferDualPairs) {
+    if (!(flags.size2RegionCount >= 1 || flags.hasLinePin || flags.hasPigeonhole2 || soft)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function starsForLesson(lesson: Lesson, ratingStars: number): { stars: number; label: string } {
+  const base: Record<TechniqueId, number> = {
+    T0: 1,
+    T1: 2,
+    T2: 3,
+    T3: 3,
+    T4: 5,
+    T5: 6,
+    T6: 8,
+  };
+  let stars = Math.max(base[lesson.technique], Math.min(10, ratingStars));
+  if (lesson.size >= 9) stars = Math.min(10, stars + 1);
+  if (lesson.technique === 'T6') stars = Math.max(7, stars);
+  const label =
+    stars <= 2 ? '入门' : stars <= 3 ? '简单' : stars <= 5 ? '普通' : stars <= 6 ? '进阶' : stars <= 8 ? '困难' : '专家';
+  return { stars, label };
 }
 
 function generateOne(
   id: number,
   seed: number,
+  lesson: Lesson,
   opts: {
-    maxSingletons: number;
     usedBoards: Set<string>;
     usedCanonical: Set<string>;
     usedSolutions: Set<string>;
     prevSolutionKey: string | null;
-    /** 4×4 only has 2 cat layouts — allow reuse after trying to alternate. */
     strictNewSolution: boolean;
   },
 ): LevelDefinition | null {
-  const size = sizeForLevel(id);
-  const needNoGuess = requireNoGuess(id);
-  const singles = opts.maxSingletons; // caller already applied schedule + smooth drop
-  const innerAttempts = size >= 9 ? 80 : size >= 7 ? 110 : 160;
+  const size = lesson.size;
+  const innerAttempts = size >= 9 ? 36 : size >= 8 ? 48 : size >= 7 ? 55 : 90;
 
   for (let attempt = 0; attempt < innerAttempts; attempt++) {
-    // Mix id+attempt into seed so consecutive levels don't recycle the same stream
     const rand = mulberry32((seed + attempt * 0x9e3779b9 + id * 0x85ebca6b) >>> 0);
     const solution = placeSolution(size, rand);
     if (!solution) continue;
     const solKey = `${size}|${[...solution].sort((a, b) => a - b).join(',')}`;
     if (opts.strictNewSolution && opts.usedSolutions.has(solKey)) continue;
-    // Prefer alternating solution vs previous (especially tiny boards)
     if (
       opts.prevSolutionKey &&
       solKey === opts.prevSolutionKey &&
-      attempt < Math.floor(innerAttempts * 0.7)
+      attempt < Math.floor(innerAttempts * 0.65)
     ) {
       continue;
     }
 
-    // Prefer exact singleton budget; also try one fewer (harder), never more
     const strategies: Array<() => number[] | null> = [];
-    const floor = singletonFloor(size);
-    strategies.push(() => easyRegions(size, solution, rand, singles));
-    if (singles > floor) {
-      strategies.push(() => easyRegions(size, solution, rand, Math.max(floor, singles - 1)));
-    }
-    if (singles <= floor + 1) {
+    if (lesson.technique === 'T4' || lesson.requirePigeonhole === 3) {
+      strategies.push(() => pigeonholeRegions(size, solution, rand, 3, rand() < 0.5 ? 'col' : 'row'));
+      strategies.push(() => pigeonholeRegions(size, solution, rand, 2, 'col'));
+      strategies.push(() => linePinRegions(size, solution, rand, 'row'));
+      strategies.push(() => easyRegions(size, solution, rand, Math.max(1, lesson.maxSingles)));
+    } else if (lesson.requirePigeonhole === 2) {
+      strategies.push(() => linePinRegions(size, solution, rand, 'row'));
+      strategies.push(() => linePinRegions(size, solution, rand, 'col'));
+      strategies.push(() => pigeonholeRegions(size, solution, rand, 2, rand() < 0.5 ? 'col' : 'row'));
+      strategies.push(() => easyRegions(size, solution, rand, Math.max(1, lesson.maxSingles)));
+    } else if (lesson.requireLinePin) {
+      strategies.push(() => linePinRegions(size, solution, rand, 'row'));
+      strategies.push(() => linePinRegions(size, solution, rand, 'col'));
+    } else if (lesson.preferDualPairs) {
+      strategies.push(() =>
+        easyRegions(size, solution, rand, Math.max(1, Math.min(lesson.maxSingles, 2))),
+      );
+      strategies.push(() => linePinRegions(size, solution, rand, 'row'));
+      strategies.push(() => dualPairRegions(size, solution, rand));
+    } else if (lesson.technique === 'T0' || lesson.maxSingles > 0) {
+      const s = Math.max(lesson.minSingles, Math.min(lesson.maxSingles, Math.floor(size / 2)));
+      strategies.push(() => easyRegions(size, solution, rand, s));
+      strategies.push(() => easyRegions(size, solution, rand, lesson.minSingles));
+    } else if (lesson.technique === 'T6') {
+      strategies.push(() => easyRegions(size, solution, rand, lesson.maxSingles));
+      strategies.push(() => voronoiRegions(size, solution, rand));
+    } else {
+      strategies.push(() => easyRegions(size, solution, rand, lesson.maxSingles));
       strategies.push(() => voronoiRegions(size, solution, rand));
     }
 
@@ -501,25 +660,16 @@ function generateOne(
     });
     if (unique.status !== 'ONE') continue;
 
+    const soft = lesson.preferDualPairs || lesson.technique === 'T5' || attempt > innerAttempts * 0.25;
+    if (!matchesLesson(level, lesson, soft)) continue;
+
     const rating = rateLevel(level);
-    if (needNoGuess && !rating.noGuess) continue;
-
-    const gotSingles = countSingletonRegions(level);
-    // Easier = more singletons than allowed → discard
-    if (gotSingles > singles) continue;
-    if (gotSingles < floor) continue;
-    // Smooth descent: at most one singleton step below this level's target
-    if (gotSingles < singles - 1) continue;
-
-    // Early 4×4 stay 入门; guided tips only on 1–2 in UI
-    if (id <= 7) {
-      level.difficulty = id <= 2 ? 1 : Math.min(2, rating.stars);
-      level.difficultyLabel = '入门';
-    } else {
-      level.difficulty = rating.stars;
-      level.difficultyLabel = rating.tier;
-    }
+    const { stars, label } = starsForLesson(lesson, rating.stars);
+    level.difficulty = lesson.technique === 'T0' ? Math.min(2, stars) : stars;
+    level.difficultyLabel = lesson.technique === 'T0' ? '入门' : label;
     level.noGuess = rating.noGuess;
+    level.technique = lesson.technique;
+    level.techniqueLabel = TECHNIQUE_LABELS[lesson.technique];
     level.elite = id >= 100 && id % 25 === 0;
     return level;
   }
@@ -537,7 +687,7 @@ function writePack(levels: LevelDefinition[]): void {
   writeFileSync(
     tsPath,
     `import type { LevelsFile } from '../core/level/LevelDefinition';\n\n` +
-      `/** Auto-generated pack (max 10×10). Re-run: npm run generate:levels */\n` +
+      `/** Auto-generated technique curriculum pack. Re-run: npm run generate:levels */\n` +
       `export const STARTER_LEVELS: LevelsFile = ${JSON.stringify(file, null, 2)} as LevelsFile;\n`,
   );
 }
@@ -546,19 +696,14 @@ function main(): void {
   const count = Number(process.env.LEVEL_COUNT ?? 500);
   const startId = Number(process.env.LEVEL_START ?? 1);
   const levels: LevelDefinition[] = [];
-  let seed = 20261126 + startId * 9973;
+  let seed = 20261127 + startId * 7919;
   const t0 = Date.now();
 
-  // Resume: keep levels before startId from existing pack when present
   const jsonPath = join(ROOT, 'assets/resources/data/levels.json');
   if (startId > 1 && existsSync(jsonPath)) {
     try {
-      const prev = JSON.parse(readFileSync(jsonPath, 'utf8')) as {
-        levels: LevelDefinition[];
-      };
-      for (const l of prev.levels) {
-        if (l.id < startId) levels.push(l);
-      }
+      const prev = JSON.parse(readFileSync(jsonPath, 'utf8')) as { levels: LevelDefinition[] };
+      for (const l of prev.levels) if (l.id < startId) levels.push(l);
       levels.sort((a, b) => a.id - b.id);
       console.log(`resuming from ${startId}, kept ${levels.length} prior levels`);
     } catch {
@@ -566,76 +711,84 @@ function main(): void {
     }
   }
 
-  let prevSize = -1;
-  let prevSingletons = Number.POSITIVE_INFINITY;
   const usedBoards = new Set<string>();
   const usedCanonical = new Set<string>();
   const usedSolutions = new Set<string>();
   let prevSolutionKey: string | null = null;
-  if (levels.length) {
-    const last = levels[levels.length - 1]!;
-    prevSize = last.size;
-    prevSingletons = countSingletonRegions(last);
-    prevSolutionKey = solutionFingerprint(last);
-    for (const l of levels) {
-      usedBoards.add(boardFingerprint(l));
-      usedCanonical.add(canonicalBoardFingerprint(l));
-      usedSolutions.add(solutionFingerprint(l));
-    }
+  let prevSize = -1;
+  for (const l of levels) {
+    usedBoards.add(boardFingerprint(l));
+    usedCanonical.add(canonicalBoardFingerprint(l));
+    usedSolutions.add(solutionFingerprint(l));
+    prevSolutionKey = solutionFingerprint(l);
+    prevSize = l.size;
   }
 
   for (let id = startId; id <= count; id++) {
-    const size = sizeForLevel(id);
-    if (size !== prevSize) {
-      // New size stage: reset freeness + solution pool (boards stay global)
-      prevSingletons = Number.POSITIVE_INFINITY;
-      prevSize = size;
-      prevSolutionKey = null;
+    const lesson = curriculumFor(id);
+    if (lesson.size !== prevSize) {
       usedSolutions.clear();
+      prevSolutionKey = null;
+      prevSize = lesson.size;
+    }
+    // Same-size stages can exhaust the solution pool (e.g. 6×6≈90 layouts).
+    // Keep only a short recent window so boards stay varied without getting stuck.
+    if (usedSolutions.size > 24) {
+      usedSolutions.clear();
+      if (prevSolutionKey) usedSolutions.add(prevSolutionKey);
     }
 
     let level: LevelDefinition | null = null;
-    // Follow schedule, never rise vs previous, drop by at most 1 per level
-    const scheduled = singletonTargetFor(id, size);
-    const target =
-      prevSingletons === Number.POSITIVE_INFINITY
-        ? scheduled
-        : Math.min(prevSingletons, Math.max(scheduled, prevSingletons - 1));
-    const maxRetry = requireNoGuess(id) ? 700 : size >= 7 ? 420 : 320;
+    const maxRetry = lesson.size >= 8 ? 160 : lesson.size >= 7 ? 200 : lesson.requireNoGuess ? 320 : 220;
     for (let retry = 0; retry < maxRetry && !level; retry++) {
-      // Late retries: hold singleton count if a drop is scarce
-      const tryTarget =
-        retry > maxRetry * 0.6 && prevSingletons < Number.POSITIVE_INFINITY
-          ? Math.min(prevSingletons, target + 1)
-          : target;
-      level = generateOne(id, seed++, {
-        maxSingletons: Math.min(tryTarget, prevSingletons),
+      // Late: soften dual-pair / pigeonhole-3 to related weaker structure
+      let softLesson: Lesson = lesson;
+      if (retry > maxRetry * 0.55 && lesson.requirePigeonhole === 3) {
+        softLesson = { ...lesson, requirePigeonhole: 2, maxSingles: Math.max(lesson.maxSingles, 2) };
+      } else if (retry > maxRetry * 0.5 && lesson.preferDualPairs) {
+        softLesson = {
+          ...lesson,
+          preferDualPairs: false,
+          requireLinePin: false,
+          requireNoGuess: false,
+          minSingles: 1,
+          maxSingles: Math.max(3, lesson.maxSingles),
+        };
+      } else if (retry > maxRetry * 0.7 && lesson.technique === 'T6') {
+        // Still require unique; allow a no-guess board only as last resort but keep T6 tag only if !noGuess
+        softLesson = { ...lesson, maxSingles: Math.max(lesson.maxSingles, 2) };
+      }
+      if (retry > 0 && retry % 40 === 0) {
+        console.log(`… still working level ${id} (${lesson.technique} ${lesson.size}x) retry=${retry}`);
+      }
+      level = generateOne(id, seed++, softLesson, {
         usedBoards,
         usedCanonical,
         usedSolutions,
         prevSolutionKey,
-        // 4×4 has only 2 legal cat layouts; 5×5 has 14 for 15 levels — soft late
-        strictNewSolution: size >= 5 && retry < maxRetry * 0.75,
+        strictNewSolution: lesson.size >= 7 && retry < maxRetry * 0.4,
       });
     }
     if (!level) {
-      console.error(
-        `Failed to generate level ${id} (size=${size}, prevS=${prevSingletons}, target=${target})`,
-      );
+      console.error(`Failed level ${id}`, curriculumFor(id));
       process.exit(1);
     }
-    const singles = countSingletonRegions(level);
-    const hard = levelHardness(level);
-    prevSingletons = singles;
+
     usedBoards.add(boardFingerprint(level));
     usedCanonical.add(canonicalBoardFingerprint(level));
     usedSolutions.add(solutionFingerprint(level));
     prevSolutionKey = solutionFingerprint(level);
     levels.push(level);
+
     if (id % 25 === 0 || id === count) {
-      const ng = levels.filter((l) => l.noGuess).length;
+      const byTech: Record<string, number> = {};
+      for (const l of levels) {
+        const t = l.technique ?? '?';
+        byTech[t] = (byTech[t] ?? 0) + 1;
+      }
       console.log(
-        `generated ${id}/${count} · batchNoGuess=${ng} · last=${level.size}x${level.size} S${singles} H${hard} ${level.difficultyLabel}${level.difficulty} · ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+        `generated ${id}/${count} · last=${level.size}x${level.size} ${level.technique} · ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+        byTech,
       );
       if (startId === 1) writePack(levels);
     }
@@ -648,30 +801,6 @@ function main(): void {
   }
 
   if (startId === 1) {
-    const four = levels.filter((l) => l.id <= 7);
-    if (four.some((l) => l.size !== 4 || !l.noGuess)) {
-      console.error(
-        'Levels 1–7 must be 4×4 no-guess',
-        four.map((l) => ({ id: l.id, size: l.size, noGuess: l.noGuess })),
-      );
-      process.exit(1);
-    }
-    const level8 = levels.find((l) => l.id === 8);
-    if (!level8 || level8.size !== 5) {
-      console.error('Level 8 must be 5×5', level8);
-      process.exit(1);
-    }
-    const early = levels.filter((l) => l.id <= 40);
-    const badEasy = early.filter((l) => !l.noGuess);
-    if (badEasy.length) {
-      console.error(
-        'First 40 must be no-guess',
-        badEasy.map((l) => l.id),
-      );
-      process.exit(1);
-    }
-
-    // No duplicate boards (exact or color-relabel isomorphic)
     const seenBoard = new Set<string>();
     const seenCanon = new Set<string>();
     for (const l of levels) {
@@ -684,16 +813,11 @@ function main(): void {
       seenBoard.add(b);
       seenCanon.add(c);
     }
-
-    // Within each size stage: singletons never increase (not easier by freebies)
-    for (let i = 1; i < levels.length; i++) {
-      const a = levels[i - 1]!;
-      const b = levels[i]!;
-      if (a.size !== b.size) continue;
-      const sa = countSingletonRegions(a);
-      const sb = countSingletonRegions(b);
-      if (sb > sa) {
-        console.error(`Singleton increased within stage at level ${b.id}: ${sa} → ${sb}`);
+    for (const id of [1, 2, 5, 30, 55, 110, 300]) {
+      const l = levels.find((x) => x.id === id);
+      const lesson = curriculumFor(id);
+      if (!l || l.technique !== lesson.technique) {
+        console.error(`Curriculum mismatch at ${id}`, l?.technique, lesson.technique);
         process.exit(1);
       }
     }
@@ -703,24 +827,18 @@ function main(): void {
 
   const byTier: Record<string, number> = {};
   const bySize: Record<number, number> = {};
+  const byTech: Record<string, number> = {};
   for (const l of levels) {
     byTier[l.difficultyLabel ?? '?'] = (byTier[l.difficultyLabel ?? '?'] ?? 0) + 1;
     bySize[l.size] = (bySize[l.size] ?? 0) + 1;
+    byTech[l.technique ?? '?'] = (byTech[l.technique ?? '?'] ?? 0) + 1;
   }
   console.log(
     JSON.stringify(
       {
         total: levels.length,
-        range: [startId, count],
         noGuess: levels.filter((l) => l.noGuess).length,
-        levels1to7_4x4:
-          startId === 1
-            ? levels.filter((l) => l.id <= 7).every((l) => l.size === 4 && l.noGuess)
-            : undefined,
-        level8_5x5: startId === 1 ? levels.find((l) => l.id === 8)?.size === 5 : undefined,
-        first40NoGuess:
-          startId === 1 ? levels.filter((l) => l.id <= 40).every((l) => l.noGuess) : undefined,
-        maxSize: Math.max(...levels.map((l) => l.size)),
+        byTech,
         byTier,
         bySize,
         elapsedSec: Number(((Date.now() - t0) / 1000).toFixed(1)),
@@ -731,4 +849,5 @@ function main(): void {
   );
 }
 
-main();
+const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isDirect) main();

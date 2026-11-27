@@ -23,6 +23,10 @@ export interface LevelDefinition {
   /** True when solvable by forced moves only (no guessing). */
   noGuess?: boolean;
   elite?: boolean;
+  /** Primary curriculum technique T0–T6. */
+  technique?: 'T0' | 'T1' | 'T2' | 'T3' | 'T4' | 'T5' | 'T6';
+  /** Chinese short label for the technique. */
+  techniqueLabel?: string;
 }
 
 export interface BoardValidation {
