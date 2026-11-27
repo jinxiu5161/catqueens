@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2015",
+    "module": "ES2015",
+    "strict": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "lib": ["ES2015", "DOM"],
+    "types": ["."]
+  },
+  "include": ["./assets/scripts/**/*.ts"],
+  "exclude": ["./node_modules"]
+}
