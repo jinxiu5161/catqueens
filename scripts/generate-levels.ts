@@ -19,6 +19,7 @@ import {
   type Lesson,
   type TechniqueId,
 } from '../assets/scripts/core/level/LevelTechniques';
+import { findCoachStep } from '../assets/scripts/core/level/TechniqueCoach';
 import { puzzleSolver } from '../assets/scripts/core/puzzle/PuzzleSolver';
 import { puzzleValidator } from '../assets/scripts/core/puzzle/PuzzleValidator';
 import { neighborIndexes, regionsAreFourConnected } from '../assets/scripts/core/puzzle/PuzzleRules';
@@ -255,15 +256,28 @@ function linePinRegions(
   solution: number[],
   rand: () => number,
   along: 'row' | 'col',
+  opts?: { preferLen?: 2 | 3; preferEdgeLine?: boolean },
 ): number[] | null {
-  const rid = Math.floor(rand() * size);
+  const preferLen = opts?.preferLen ?? (rand() < 0.55 ? 2 : 3);
+  // Prefer an edge line for teach levels so the spotlight band is obvious.
+  let rid = Math.floor(rand() * size);
+  if (opts?.preferEdgeLine) {
+    const edgeRids = solution
+      .map((cell, i) => ({ i, cell }))
+      .filter(({ cell }) => {
+        const line = along === 'row' ? rowOf(cell, size) : colOf(cell, size);
+        return line === 0 || line === size - 1;
+      })
+      .map((x) => x.i);
+    if (edgeRids.length) rid = edgeRids[Math.floor(rand() * edgeRids.length)]!;
+  }
   const seed = solution[rid]!;
   const sr = rowOf(seed, size);
   const sc = colOf(seed, size);
   const strip: number[] = [seed];
   const deltas = shuffle([-1, 1, -2, 2], rand);
   for (const d of deltas) {
-    if (strip.length >= 3) break;
+    if (strip.length >= preferLen) break;
     const nr = along === 'row' ? sr : sr + d;
     const nc = along === 'row' ? sc + d : sc;
     if (nr < 0 || nc < 0 || nr >= size || nc >= size) continue;
@@ -541,6 +555,13 @@ function matchesLesson(level: LevelDefinition, lesson: Lesson, soft = false): bo
   // T6 must actually need guessing; other techniques may be guess or no-guess
   if (lesson.technique === 'T6' && flags.noGuess && !soft) return false;
   if (lesson.requireLinePin && !flags.hasLinePin) return false;
+  // T1 teach should demo a satisfying multi-cell clear (reference-style).
+  if (lesson.mode === 'teach' && lesson.technique === 'T1') {
+    const demo = findCoachStep(level, 'T1');
+    const n = demo?.targetCells.length ?? 0;
+    if (!soft && n < 2) return false;
+    if (soft && n < 1) return false;
+  }
   if (lesson.requirePigeonhole === 2) {
     if (!soft && !(flags.hasPigeonhole2 || flags.hasLinePin)) return false;
   }
@@ -574,7 +595,7 @@ function starsForLesson(lesson: Lesson, ratingStars: number): { stars: number; l
   return { stars, label };
 }
 
-function generateOne(
+export function generateOne(
   id: number,
   seed: number,
   lesson: Lesson,
@@ -615,8 +636,21 @@ function generateOne(
       strategies.push(() => pigeonholeRegions(size, solution, rand, 2, rand() < 0.5 ? 'col' : 'row'));
       strategies.push(() => easyRegions(size, solution, rand, Math.max(1, lesson.maxSingles)));
     } else if (lesson.requireLinePin) {
-      strategies.push(() => linePinRegions(size, solution, rand, 'row'));
-      strategies.push(() => linePinRegions(size, solution, rand, 'col'));
+      const teachPin = lesson.mode === 'teach';
+      const pinOpts = teachPin
+        ? ({ preferLen: 2 as const, preferEdgeLine: true } as const)
+        : undefined;
+      strategies.push(() => linePinRegions(size, solution, rand, 'row', pinOpts));
+      strategies.push(() => linePinRegions(size, solution, rand, 'col', pinOpts));
+      if (teachPin) {
+        // Fallbacks if edge+len2 is scarce
+        strategies.push(() =>
+          linePinRegions(size, solution, rand, 'row', { preferLen: 2 }),
+        );
+        strategies.push(() =>
+          linePinRegions(size, solution, rand, 'col', { preferLen: 2 }),
+        );
+      }
     } else if (lesson.preferDualPairs) {
       strategies.push(() =>
         easyRegions(size, solution, rand, Math.max(1, Math.min(lesson.maxSingles, 2))),

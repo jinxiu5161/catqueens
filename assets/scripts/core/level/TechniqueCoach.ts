@@ -53,11 +53,26 @@ function combos(arr: number[], n: number): number[][] {
   return out;
 }
 
+/**
+ * Score a T1 demo: reference-style is a short pin (2–3 cells) that clears
+ * several other cells on the line — that feels powerful, not fiddly.
+ */
+function scoreLinePinDemo(excludeCount: number, regionSize: number): number {
+  let score = 0;
+  if (excludeCount >= 2 && excludeCount <= 3) score += 200 - Math.abs(3 - excludeCount) * 15;
+  else if (excludeCount === 1) score += 20;
+  else score += 80 + Math.min(excludeCount, 4);
+  if (regionSize === 2) score += 40;
+  else if (regionSize === 3) score += 25;
+  return score;
+}
+
 /** Region fully contained in one row or one column (size ≥ 2). */
 function findLinePinExclude(level: LevelDefinition): CoachStep | null {
   const size = level.size;
   const buckets = regionBuckets(level);
   let best: CoachStep | null = null;
+  let bestScore = -1;
 
   for (let rid = 0; rid < size; rid++) {
     const cells = buckets[rid]!;
@@ -71,11 +86,12 @@ function findLinePinExclude(level: LevelDefinition): CoachStep | null {
     const axis: 'row' | 'col' = sameRow ? 'row' : 'col';
     const line = sameRow ? r0 : c0;
     const exclude: number[] = [];
-    const focus = new Set<number>(cells);
+    // Focus ONLY the locked line — matches the reference spotlight band.
+    const focus: number[] = [];
     for (let i = 0; i < size * size; i++) {
       const onLine = axis === 'row' ? rowOf(i, size) === line : colOf(i, size) === line;
       if (!onLine) continue;
-      focus.add(i);
+      focus.push(i);
       if (level.regions[i] !== rid) exclude.push(i);
     }
     if (exclude.length === 0) continue;
@@ -83,13 +99,17 @@ function findLinePinExclude(level: LevelDefinition): CoachStep | null {
     const step: CoachStep = {
       technique: 'T1',
       action: 'EXCLUDE',
-      focusCells: [...focus],
+      focusCells: focus,
       targetCells: exclude,
       regionId: rid,
       axis,
       messageKey: axis === 'row' ? 'coach.T1_row' : 'coach.T1_col',
     };
-    if (!best || step.targetCells.length < best.targetCells.length) best = step;
+    const score = scoreLinePinDemo(exclude.length, cells.length);
+    if (score > bestScore) {
+      bestScore = score;
+      best = step;
+    }
   }
   return best;
 }

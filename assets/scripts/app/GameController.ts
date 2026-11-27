@@ -237,6 +237,7 @@ export class GameController extends Component {
     const step = findCoachStep(level, tech);
     if (!step || step.targetCells.length === 0) return;
     this.coach = { step, done: new Set() };
+    this.techniqueGuide.setBoardFrame(this.boardView.getBoardFrameInParent());
     this.techniqueGuide.show(step);
     this.refreshCoachSpotlight();
   }

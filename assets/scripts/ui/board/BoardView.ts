@@ -236,8 +236,8 @@ export class BoardView extends Component {
     const presented = presentConflicts(validation);
 
     if (this.coachFocus.size > 0) {
-      // Dim cells outside the teach focus so the line/region stands out.
-      g.fillColor = hexColor('rgba(12,18,16,0.62)');
+      // Dim non-focus cells (HUD dim is drawn separately by TechniqueGuidePanel).
+      g.fillColor = hexColor('rgba(8,12,10,0.72)');
       for (let i = 0; i < size * size; i++) {
         if (this.coachFocus.has(i)) continue;
         const r = rowOf(i, size);
@@ -248,18 +248,34 @@ export class BoardView extends Component {
         g.fill();
       }
 
+      // Soft gold wash across the whole focus band (reference yellow glow).
+      for (const idx of this.coachFocus) {
+        const r = rowOf(idx, size);
+        const c = colOf(idx, size);
+        const x = origin + c * cell;
+        const y = origin + (size - 1 - r) * cell;
+        g.fillColor = hexColor('rgba(244,211,94,0.28)');
+        g.rect(x, y, cell, cell);
+        g.fill();
+        g.strokeColor = hexColor('rgba(244,211,94,0.85)');
+        g.lineWidth = 3;
+        g.rect(x + 2, y + 2, cell - 4, cell - 4);
+        g.stroke();
+      }
+
+      // Stronger coral/pink rim on cells the player must exclude.
       for (const idx of this.coachTargets) {
         const r = rowOf(idx, size);
         const c = colOf(idx, size);
         const x = origin + c * cell;
         const y = origin + (size - 1 - r) * cell;
-        g.strokeColor = hexColor(BOARD_THEME.hint);
-        g.lineWidth = 5;
-        g.rect(x + 3, y + 3, cell - 6, cell - 6);
-        g.stroke();
-        g.fillColor = hexColor('rgba(244,211,94,0.22)');
-        g.rect(x + 3, y + 3, cell - 6, cell - 6);
+        g.fillColor = hexColor('rgba(232,120,140,0.28)');
+        g.rect(x + 4, y + 4, cell - 8, cell - 8);
         g.fill();
+        g.strokeColor = hexColor('#E8899A');
+        g.lineWidth = 4;
+        g.rect(x + 4, y + 4, cell - 8, cell - 8);
+        g.stroke();
       }
 
       if (this.coachPointer >= 0) {
@@ -318,7 +334,7 @@ export class BoardView extends Component {
     }
   }
 
-  /** Simple white glove + ripple so the player knows where to tap. */
+  /** Cartoon white glove + tap ripple (reference-style). */
   private drawCoachHand(
     g: Graphics,
     index: number,
@@ -328,37 +344,50 @@ export class BoardView extends Component {
   ): void {
     const r = rowOf(index, size);
     const c = colOf(index, size);
-    const cx = origin + c * cell + cell * 0.62;
-    const cy = origin + (size - 1 - r) * cell + cell * 0.28;
-    const pulse = 0.85 + 0.15 * Math.sin((this.coachPulse / 1.2) * Math.PI * 2);
-    const rad = cell * 0.22 * pulse;
+    const cx = origin + c * cell + cell * 0.55;
+    const cy = origin + (size - 1 - r) * cell + cell * 0.22;
+    const pulse = 0.82 + 0.18 * Math.sin((this.coachPulse / 1.2) * Math.PI * 2);
+    const rad = cell * 0.2 * pulse;
 
-    g.strokeColor = hexColor('rgba(255,255,255,0.75)');
-    g.lineWidth = 2;
-    g.circle(cx, cy, rad * 1.35);
-    g.stroke();
-    g.circle(cx, cy, rad * 0.85);
-    g.stroke();
-
-    // Glove palm
-    g.fillColor = hexColor('#FFFFFF');
-    g.circle(cx, cy - cell * 0.02, cell * 0.16);
+    g.fillColor = hexColor('rgba(255,255,255,0.18)');
+    g.circle(cx, cy, rad * 1.55);
     g.fill();
-    // Fingers
-    for (let i = -1; i <= 1; i++) {
+    g.strokeColor = hexColor('rgba(255,255,255,0.9)');
+    g.lineWidth = 3;
+    g.circle(cx, cy, rad * 1.15);
+    g.stroke();
+    g.circle(cx, cy, rad * 0.7);
+    g.stroke();
+
+    const palmX = cx + cell * 0.06;
+    const palmY = cy - cell * 0.08;
+    g.fillColor = hexColor('#FFFFFF');
+    g.circle(palmX, palmY, cell * 0.17);
+    g.fill();
+    g.strokeColor = hexColor('rgba(40,40,40,0.25)');
+    g.lineWidth = 1.5;
+    g.circle(palmX, palmY, cell * 0.17);
+    g.stroke();
+
+    for (let i = -1; i <= 2; i++) {
+      const fx = palmX + i * cell * 0.075 - cell * 0.04;
+      const fy = palmY + cell * 0.1;
       g.fillColor = hexColor('#FFFFFF');
-      g.roundRect(
-        cx + i * cell * 0.09 - cell * 0.04,
-        cy + cell * 0.08,
-        cell * 0.08,
-        cell * 0.18,
-        4,
-      );
+      g.roundRect(fx, fy, cell * 0.07, cell * 0.2, 5);
       g.fill();
     }
-    // Thumb
-    g.roundRect(cx - cell * 0.22, cy - cell * 0.04, cell * 0.14, cell * 0.08, 4);
+    g.fillColor = hexColor('#FFFFFF');
+    g.roundRect(palmX - cell * 0.26, palmY - cell * 0.02, cell * 0.16, cell * 0.09, 5);
     g.fill();
+  }
+
+  /** Board frame in parent/root space — used to cut dim overlays around the grid. */
+  getBoardFrameInParent(): { x: number; y: number; size: number } {
+    return {
+      x: this.node.position.x,
+      y: this.node.position.y,
+      size: this.boardSizePx,
+    };
   }
 
   private localFromTouch(e: EventTouch): { x: number; y: number } {

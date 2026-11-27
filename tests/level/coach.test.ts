@@ -21,8 +21,9 @@ describe('interactive technique coach', () => {
     const step = findCoachStep(level, 'T1');
     expect(step).not.toBeNull();
     expect(step!.action).toBe('EXCLUDE');
-    expect(step!.targetCells.length).toBeGreaterThan(0);
-    expect(step!.focusCells.length).toBeGreaterThan(step!.targetCells.length);
+    // Teach board should clear multiple cells so the technique feels powerful
+    expect(step!.targetCells.length).toBeGreaterThanOrEqual(2);
+    expect(step!.focusCells.length).toBe(level.size);
     expect(step!.messageKey).toMatch(/^coach\.T1_/);
     for (const t of step!.targetCells) {
       expect(step!.focusCells).toContain(t);
