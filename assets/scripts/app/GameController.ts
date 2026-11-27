@@ -177,11 +177,11 @@ export class GameController extends Component {
     this.failPanel.render(nextSnap);
   }
 
-  /** Levels 1–8 show rule tips; later empty boards get exclude gesture tip. */
+  /** Levels 1–2 show onboarding tips; later empty boards get exclude gesture tip. */
   private defaultTipFor(snap: SessionSnapshot): string {
     if (snap.noStamina || snap.levelFailed) return this.message;
     const id = snap.level.id;
-    if (id >= 1 && id <= 8) return i18n.t(`tutorial.${id}`);
+    if (id === 1 || id === 2) return i18n.t(`tutorial.${id}`);
     const hasMarks = snap.board.some((c) => c !== 'EMPTY');
     if (!hasMarks) return i18n.t('board.tip_exclude');
     return '';
