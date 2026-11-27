@@ -10,7 +10,7 @@ import {
 } from 'cc';
 import { i18n } from '../../core/localization/I18n';
 import type { CoachStep } from '../../core/level/TechniqueCoach';
-import { BOARD_THEME, REGION_COLORS } from '../board/BoardTheme';
+import { REGION_COLORS } from '../board/BoardTheme';
 
 const { ccclass } = _decorator;
 
@@ -22,15 +22,14 @@ function hex(c: string): Color {
 
 /**
  * Reference-style coach chrome: screen dim (HUD/actions), speech bubble with
- * region color chip. Board spotlight / hand live on BoardView.
- * Dim graphics do not use BlockInputEvents — touches pass through to the board.
+ * one or more region color chips. Board spotlight / hand live on BoardView.
  */
 @ccclass('TechniqueGuidePanel')
 export class TechniqueGuidePanel extends Component {
   private root: Node | null = null;
   private dimGfx: Graphics | null = null;
   private bubble: Node | null = null;
-  private chipGfx: Graphics | null = null;
+  private chipHost: Node | null = null;
   private bodyLabel: Label | null = null;
   private boardFrame: { x: number; y: number; size: number } = { x: 0, y: 40, size: 900 };
 
@@ -72,17 +71,16 @@ export class TechniqueGuidePanel extends Component {
     g.fill();
     this.bubble.addChild(bg);
 
-    const chipNode = new Node('RegionChip');
-    chipNode.layer = this.node.layer;
-    chipNode.addComponent(UITransform).setContentSize(36, 36);
-    chipNode.setPosition(-248, 10, 0);
-    this.chipGfx = chipNode.addComponent(Graphics);
-    this.bubble.addChild(chipNode);
+    this.chipHost = new Node('ChipHost');
+    this.chipHost.layer = this.node.layer;
+    this.chipHost.addComponent(UITransform).setContentSize(120, 40);
+    this.chipHost.setPosition(-230, 10, 0);
+    this.bubble.addChild(this.chipHost);
 
     const textNode = new Node('Body');
     textNode.layer = this.node.layer;
-    textNode.addComponent(UITransform).setContentSize(480, 130);
-    textNode.setPosition(28, 4, 0);
+    textNode.addComponent(UITransform).setContentSize(460, 130);
+    textNode.setPosition(40, 4, 0);
     this.bodyLabel = textNode.addComponent(Label);
     this.bodyLabel.fontSize = 24;
     this.bodyLabel.lineHeight = 34;
@@ -95,31 +93,54 @@ export class TechniqueGuidePanel extends Component {
     this.root.active = false;
   }
 
-  /** Keep dim cutout aligned with the live board frame. */
   setBoardFrame(frame: { x: number; y: number; size: number }): void {
     this.boardFrame = frame;
     if (this.root?.active) this.redrawDim();
   }
 
   show(step: CoachStep): void {
-    if (!this.root || !this.bodyLabel || !this.chipGfx || !this.bubble) return;
-    const color =
-      step.regionId != null
-        ? REGION_COLORS[step.regionId % REGION_COLORS.length]!
-        : BOARD_THEME.accent;
+    if (!this.root || !this.bodyLabel || !this.chipHost || !this.bubble) return;
 
-    this.chipGfx.clear();
-    this.chipGfx.fillColor = hex(color);
-    this.chipGfx.roundRect(-18, -18, 36, 36, 5);
-    this.chipGfx.fill();
-    this.chipGfx.strokeColor = hex('#5A4630');
-    this.chipGfx.lineWidth = 2;
-    this.chipGfx.roundRect(-18, -18, 36, 36, 5);
-    this.chipGfx.stroke();
+    const ids =
+      step.regionIds && step.regionIds.length > 0
+        ? step.regionIds
+        : step.regionId != null
+          ? [step.regionId]
+          : [];
+
+    this.chipHost.removeAllChildren();
+    const chipW = 32;
+    const gap = 8;
+    const totalW = ids.length > 0 ? ids.length * chipW + (ids.length - 1) * gap : 0;
+    ids.forEach((rid, i) => {
+      const color = REGION_COLORS[rid % REGION_COLORS.length]!;
+      const chip = new Node(`Chip${i}`);
+      chip.layer = this.chipHost!.layer;
+      chip.addComponent(UITransform).setContentSize(chipW, chipW);
+      chip.setPosition(-totalW / 2 + chipW / 2 + i * (chipW + gap), 0, 0);
+      const cg = chip.addComponent(Graphics);
+      cg.fillColor = hex(color);
+      cg.roundRect(-chipW / 2, -chipW / 2, chipW, chipW, 5);
+      cg.fill();
+      cg.strokeColor = hex('#5A4630');
+      cg.lineWidth = 2;
+      cg.roundRect(-chipW / 2, -chipW / 2, chipW, chipW, 5);
+      cg.stroke();
+      this.chipHost!.addChild(chip);
+    });
+
+    // Shift body text when multiple chips need width on the left.
+    const textNode = this.bodyLabel.node;
+    if (ids.length >= 2) {
+      textNode.setPosition(50, 4, 0);
+      this.chipHost.setPosition(-220, 10, 0);
+    } else {
+      textNode.setPosition(40, 4, 0);
+      this.chipHost.setPosition(-230, 10, 0);
+    }
 
     this.bodyLabel.string = i18n.t(step.messageKey).replace(/\{region\}/g, '');
 
-    // Sit the bubble just above the board
     const top = this.boardFrame.y + this.boardFrame.size / 2;
     this.bubble.setPosition(0, top + 110, 0);
 
@@ -135,7 +156,6 @@ export class TechniqueGuidePanel extends Component {
     return !!this.root?.active;
   }
 
-  /** Dim HUD / action chrome; leave a clear window over the board. */
   private redrawDim(): void {
     if (!this.dimGfx) return;
     const visible = view.getVisibleSize();
@@ -151,13 +171,10 @@ export class TechniqueGuidePanel extends Component {
     const bottom = y - size / 2;
     const top = y + size / 2;
 
-    // Top band (above board)
     g.rect(-halfW, top, visible.width, halfH - top);
     g.fill();
-    // Bottom band (below board)
     g.rect(-halfW, -halfH, visible.width, bottom + halfH);
     g.fill();
-    // Left / right gutters beside board
     if (left > -halfW) {
       g.rect(-halfW, bottom, left + halfW, size);
       g.fill();

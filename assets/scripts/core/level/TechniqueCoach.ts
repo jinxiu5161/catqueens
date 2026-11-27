@@ -20,7 +20,10 @@ export interface CoachStep {
   action: CoachAction;
   focusCells: number[];
   targetCells: number[];
+  /** Primary region for a single color chip. */
   regionId?: number;
+  /** Multi-region tips (e.g. T2 pigeonhole) — show all chips in the bubble. */
+  regionIds?: number[];
   axis?: 'row' | 'col';
   messageKey: string;
 }
@@ -134,18 +137,25 @@ function findLinePinExclude(level: LevelDefinition): CoachStep | null {
   return best;
 }
 
-/** k regions occupying exactly k lines → exclude foreign cells on those lines. */
-function findPigeonExclude(
+export interface PigeonExcludeDemo {
+  axis: 'row' | 'col';
+  regionIds: number[];
+  /** All foreign cells on the pigeon lines (uncapped). */
+  excludeCells: number[];
+  focusCells: number[];
+}
+
+/** Best k-region pigeonhole clear (full exclude list, for quality checks). */
+export function findBestPigeonExclude(
   level: LevelDefinition,
   k: number,
-  technique: TechniqueId,
-): CoachStep | null {
+): PigeonExcludeDemo | null {
   if (k < 2 || level.size < k) return null;
   const size = level.size;
   const buckets = regionBuckets(level);
   const ids = Array.from({ length: size }, (_, i) => i);
 
-  const tryAxis = (axis: 'row' | 'col'): CoachStep | null => {
+  const tryAxis = (axis: 'row' | 'col'): PigeonExcludeDemo | null => {
     const regionLines: number[] = [];
     for (let rid = 0; rid < size; rid++) {
       let mask = 0;
@@ -156,7 +166,7 @@ function findPigeonExclude(
       regionLines.push(mask);
     }
 
-    let best: CoachStep | null = null;
+    let best: PigeonExcludeDemo | null = null;
     let bestScore = -1;
     for (const combo of combos(ids, k)) {
       let union = 0;
@@ -178,25 +188,41 @@ function findPigeonExclude(
       }
       if (exclude.length === 0) continue;
 
-      const step: CoachStep = {
-        technique,
-        action: 'EXCLUDE',
-        focusCells: focus,
-        targetCells: capTargets(exclude),
-        regionId: combo[0],
-        axis,
-        messageKey: pigeonMessageKey(technique, axis),
-      };
       const score = scorePigeonDemo(exclude.length, k);
       if (score > bestScore) {
         bestScore = score;
-        best = step;
+        best = {
+          axis,
+          regionIds: [...combo],
+          excludeCells: exclude,
+          focusCells: focus,
+        };
       }
     }
     return best;
   };
 
   return tryAxis('col') ?? tryAxis('row');
+}
+
+/** k regions occupying exactly k lines → exclude foreign cells on those lines. */
+function findPigeonExclude(
+  level: LevelDefinition,
+  k: number,
+  technique: TechniqueId,
+): CoachStep | null {
+  const demo = findBestPigeonExclude(level, k);
+  if (!demo) return null;
+  return {
+    technique,
+    action: 'EXCLUDE',
+    focusCells: demo.focusCells,
+    targetCells: capTargets(demo.excludeCells),
+    regionId: demo.regionIds[0],
+    regionIds: demo.regionIds,
+    axis: demo.axis,
+    messageKey: pigeonMessageKey(technique, demo.axis),
+  };
 }
 
 function focusAroundCell(level: LevelDefinition, index: number): number[] {

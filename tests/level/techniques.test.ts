@@ -35,10 +35,11 @@ describe('technique curriculum', () => {
 
   it('technique guides fire on first teach levels', () => {
     expect(techniqueGuideForLevel(5)).toBe('T1');
-    expect(techniqueGuideForLevel(15)).toBe('T3');
+    expect(techniqueGuideForLevel(15)).toBeNull(); // L15 has no interactive coach
     expect(techniqueGuideForLevel(29)).toBe('T2');
     expect(techniqueGuideForLevel(6)).toBeNull();
     expect(TECHNIQUE_GUIDE_LEVEL.T1).toBe(5);
+    expect(TECHNIQUE_GUIDE_LEVEL.T3).toBeUndefined();
   });
 
   it('generated pack follows curriculum technique tags', () => {

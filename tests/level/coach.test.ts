@@ -49,14 +49,11 @@ describe('interactive technique coach', () => {
     }
   });
 
-  it('T3 teach is place then cascade exclude', () => {
-    const level = file.levels.find((l) => l.id === TECHNIQUE_GUIDE_LEVEL.T3)!;
-    const steps = findCoachLesson(level, 'T3');
-    expect(steps[0]?.action).toBe('PLACE_CAT');
-    if (steps.length > 1) {
-      expect(steps[1]?.action).toBe('EXCLUDE');
-      expect(steps[1]!.targetCells.length).toBeGreaterThanOrEqual(2);
-    }
+  it('T2 teach step lists both pigeonhole regions', () => {
+    const level = file.levels.find((l) => l.id === TECHNIQUE_GUIDE_LEVEL.T2)!;
+    const step = findCoachStep(level, 'T2');
+    expect(step).not.toBeNull();
+    expect(step!.regionIds?.length).toBeGreaterThanOrEqual(2);
   });
 
   it('advances the hand pointer through unfinished targets', () => {

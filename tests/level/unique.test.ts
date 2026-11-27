@@ -31,10 +31,12 @@ describe('starter levels unique solution gate', () => {
       expect(level.size, `level ${id} stays 5×5`).toBe(5);
       expect(level.technique).toBe('T1');
     }
-    const early = file.levels.filter((l) => l.id <= 50);
+    // L29 T2 teach intentionally has no free singleton (needs pigeonhole first).
+    const early = file.levels.filter((l) => l.id <= 50 && l.id !== 29);
     for (const level of early) {
       expect(level.noGuess, `level ${level.id} should be noGuess`).toBe(true);
     }
+    expect(file.levels.find((l) => l.id === 29)!.technique).toBe('T2');
   });
 
   it('no two levels share the same board (incl. region-id relabel)', () => {

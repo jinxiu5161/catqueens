@@ -1,7 +1,8 @@
 import { neighborIndexes } from '../puzzle/PuzzleRules';
 import type { LevelDefinition } from '../puzzle/PuzzleTypes';
 import { colOf, rowOf } from '../puzzle/PuzzleTypes';
-import { singletonSolutionCats } from './TechniqueCoach';
+import { firstForcedPlacement } from './LevelDifficulty';
+import { findBestPigeonExclude, singletonSolutionCats } from './TechniqueCoach';
 
 /**
  * Beginner “open” cells: not a cat and not an exclude-note.
@@ -163,4 +164,20 @@ export function level3AdjChainOk(level: LevelDefinition): boolean {
   const both = new Set([...adjExcluded(level, first), ...rowColExcluded(level, first)]);
   const afterBoth = regionOpenSingletons(level, [first], both);
   return afterBoth.some((i) => unlocked.includes(i));
+}
+
+/**
+ * L29 T2 teach: no free first cat; applying the pigeonhole exclude must unlock
+ * at least one forced solution cat.
+ */
+export function level29NeedsT2ForFirstCat(level: LevelDefinition): boolean {
+  if (firstForcedPlacement(level) != null) return false;
+  if (beginnerForcedCats(level, [], new Set()).length > 0) return false;
+
+  const demo = findBestPigeonExclude(level, 2);
+  if (!demo || demo.regionIds.length < 2) return false;
+
+  const after = beginnerForcedCats(level, [], new Set(demo.excludeCells));
+  const solution = new Set(level.solution ?? []);
+  return after.some((i) => solution.has(i));
 }

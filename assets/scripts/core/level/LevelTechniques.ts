@@ -219,6 +219,18 @@ export function curriculumFor(id: number): Lesson {
       mode: 'practice',
     };
   }
+  if (id === 29) {
+    // T2 teach: no free singleton — pigeonhole exclude must unlock the first cat.
+    return {
+      technique: 'T2',
+      size: 6,
+      requireNoGuess: false,
+      minSingles: 0,
+      maxSingles: 0,
+      requirePigeonhole: 2,
+      mode: 'teach',
+    };
+  }
   if (id <= 32) {
     return {
       technique: 'T2',
@@ -227,7 +239,7 @@ export function curriculumFor(id: number): Lesson {
       minSingles: 0,
       maxSingles: 1,
       requirePigeonhole: 2,
-      mode: 'teach',
+      mode: 'practice',
     };
   }
   if (id <= 50) {
@@ -335,7 +347,7 @@ export function curriculumFor(id: number): Lesson {
  */
 export const TECHNIQUE_GUIDE_LEVEL: Partial<Record<TechniqueId, number>> = {
   T1: 5,
-  T3: 15,
+  // T3 teach (L15) has no interactive coach — cascade is practiced after T1.
   T2: 29,
   T4: 51,
   T5: 101,

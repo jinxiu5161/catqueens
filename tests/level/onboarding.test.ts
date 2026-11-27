@@ -11,8 +11,12 @@ import {
 import {
   level2RowColChainOk,
   level3AdjChainOk,
+  level29NeedsT2ForFirstCat,
 } from '../../assets/scripts/core/level/OnboardingChain';
-import { isNoGuessLevel } from '../../assets/scripts/core/level/LevelDifficulty';
+import {
+  firstForcedPlacement,
+  isNoGuessLevel,
+} from '../../assets/scripts/core/level/LevelDifficulty';
 
 const file = JSON.parse(
   readFileSync(join(process.cwd(), 'assets/resources/data/levels.json'), 'utf8'),
@@ -53,6 +57,20 @@ describe('early onboarding levels 1–3', () => {
     const plan = findLevelCoachPlan(level)!;
     expect(plan.guideKey).toBe('L3');
     expect(plan.prePlaceCats).toEqual(prePlaceCats);
+  });
+
+  it('L15 has no interactive technique coach', () => {
+    expect(coachGuideKeyForLevel(15)).toBeNull();
+    expect(findLevelCoachPlan(file.levels.find((l) => l.id === 15)!)).toBeNull();
+  });
+
+  it('L29 needs T2 exclude before the first cat is forced', () => {
+    const level = file.levels.find((l) => l.id === 29)!;
+    expect(coachGuideKeyForLevel(29)).toBe('T2');
+    expect(firstForcedPlacement(level)).toBeNull();
+    expect(level29NeedsT2ForFirstCat(level)).toBe(true);
+    const plan = findLevelCoachPlan(level)!;
+    expect(plan.steps[0]?.regionIds?.length).toBeGreaterThanOrEqual(2);
   });
 });
 
