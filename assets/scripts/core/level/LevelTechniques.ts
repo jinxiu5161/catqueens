@@ -152,6 +152,57 @@ export interface Lesson {
   pure?: boolean;
   /** Prefer min region area ≥3 (soft; id≥8). */
   preferMinRegionArea?: number;
+  /**
+   * Techs the player may use: primary + listed auxiliaries.
+   * Encoded as TechId numbers (0–4).
+   */
+  allowedTechs: number[];
+}
+
+/** Primary technique for a level id (shared by curriculum + allowedTechs). */
+export function primaryTechFor(id: number): TechniqueId {
+  if (id === 1) return 'T0';
+  if (id <= 7) return 'T1';
+  if (id <= 15) return 'T2';
+  if (id <= 50) return 'T3';
+  if (id <= 120) return 'T4';
+  if (id <= 250) {
+    // 高级B: mix T2/T3/T4. On 8×8, T3+aux{T0,T1} is too sparse → prefer T4.
+    const size = id <= 180 ? 7 : 8;
+    const slot = id % 3;
+    let technique: TechniqueId = slot === 0 ? 'T2' : slot === 1 ? 'T3' : 'T4';
+    if (size >= 8 && technique === 'T3') technique = 'T4';
+    return technique;
+  }
+  if (id <= 400) {
+    const size = id <= 320 ? 8 : 9;
+    if (size >= 9) return 'T4';
+    // 8×8 大师: T3 with full aux still rarely unique under k=2 gate → prefer T4.
+    const slot = id % 3;
+    const technique: TechniqueId = slot === 0 ? 'T3' : slot === 1 ? 'T4' : 'T2';
+    return technique === 'T3' ? 'T4' : technique;
+  }
+  return 'T4';
+}
+
+/** Spec auxiliaries → allowedTechs for a level id. */
+export function allowedTechsFor(id: number): number[] {
+  if (id === 1) return [0];
+  if (id <= 7) return [0, 1];
+  if (id <= 15) return [0, 1, 2];
+  if (id <= 50) return [0, 1, 2, 3];
+  if (id <= 120) return [0, 1, 2, 3, 4];
+  if (id <= 250) {
+    // 高级B: aux only T0,T1 + primary
+    const primary = ({ T0: 0, T1: 1, T2: 2, T3: 3, T4: 4 } as const)[primaryTechFor(id)];
+    return [0, 1, primary];
+  }
+  // L251–400 / 401–500: all
+  return [0, 1, 2, 3, 4];
+}
+
+function withAllowed(id: number, lesson: Omit<Lesson, 'allowedTechs'>): Lesson {
+  return { ...lesson, allowedTechs: allowedTechsFor(id) };
 }
 
 /**
@@ -162,7 +213,7 @@ export interface Lesson {
 export function curriculumFor(id: number): Lesson {
   // L1 — T0 唯一候选 guide
   if (id === 1) {
-    return {
+    return withAllowed(id, {
       technique: 'T0',
       size: 4,
       requireNoGuess: true,
@@ -172,11 +223,11 @@ export function curriculumFor(id: number): Lesson {
       stage: '入门',
       guide: true,
       guideKey: 'T0',
-    };
+    });
   }
   // L2 — T1a guide: prePlace a singleton, teach row/col exclude
   if (id === 2) {
-    return {
+    return withAllowed(id, {
       technique: 'T1',
       size: 5,
       requireNoGuess: true,
@@ -186,11 +237,11 @@ export function curriculumFor(id: number): Lesson {
       stage: '入门',
       guide: true,
       guideKey: 'T1a',
-    };
+    });
   }
   // L3 — T1 pure practice (5×5; size 4 cannot match L2 difficulty band)
   if (id === 3) {
-    return {
+    return withAllowed(id, {
       technique: 'T1',
       size: 5,
       requireNoGuess: true,
@@ -199,11 +250,11 @@ export function curriculumFor(id: number): Lesson {
       mode: 'practice',
       stage: '入门',
       pure: true,
-    };
+    });
   }
   // L4 — T1b adjacency guide (prePlaceCats)
   if (id === 4) {
-    return {
+    return withAllowed(id, {
       technique: 'T1',
       size: 5,
       requireNoGuess: true,
@@ -213,11 +264,11 @@ export function curriculumFor(id: number): Lesson {
       stage: '入门',
       guide: true,
       guideKey: 'T1b',
-    };
+    });
   }
   // L5–7 — T1 practice on 5×5 (L1 remains the sole 4×4 onboarding board)
   if (id <= 7) {
-    return {
+    return withAllowed(id, {
       technique: 'T1',
       size: 5,
       requireNoGuess: true,
@@ -226,12 +277,12 @@ export function curriculumFor(id: number): Lesson {
       mode: 'practice',
       stage: '入门',
       pure: true,
-    };
+    });
   }
   // L8–15 — T2 区域锁定，5×5
   if (id <= 15) {
     const mode: Lesson['mode'] = id === 8 ? 'teach' : id <= 11 ? 'practice' : 'mixed';
-    return {
+    return withAllowed(id, {
       technique: 'T2',
       size: 5,
       requireNoGuess: true,
@@ -244,13 +295,13 @@ export function curriculumFor(id: number): Lesson {
       guideKey: id === 8 ? 'T2' : undefined,
       pure: id !== 8 && mode === 'practice',
       preferMinRegionArea: 3,
-    };
+    });
   }
-  // L16–50 — T3 鸽巢，5×5 / 6×6
+  // L16–50 — T3 鸽巢，5×5 / 6×6 (k=2 only)
   if (id <= 50) {
     const size = id <= 25 ? 5 : 6;
     const mode: Lesson['mode'] = id === 16 ? 'teach' : id <= 21 ? 'practice' : 'mixed';
-    return {
+    return withAllowed(id, {
       technique: 'T3',
       size,
       requireNoGuess: true,
@@ -263,13 +314,13 @@ export function curriculumFor(id: number): Lesson {
       guideKey: id === 16 ? 'T3' : undefined,
       pure: id !== 16 && mode === 'practice',
       preferMinRegionArea: 3,
-    };
+    });
   }
   // L51–120 — T4 假设回溯，6×6 / 7×7
   if (id <= 120) {
     const size = id <= 80 ? 6 : 7;
     const mode: Lesson['mode'] = id === 51 ? 'teach' : id <= 56 ? 'practice' : 'mixed';
-    return {
+    return withAllowed(id, {
       technique: 'T4',
       size,
       requireNoGuess: false,
@@ -281,15 +332,14 @@ export function curriculumFor(id: number): Lesson {
       guideKey: id === 51 ? 'T4' : undefined,
       pure: id !== 51 && mode === 'practice',
       preferMinRegionArea: 3,
-    };
+    });
   }
-  // L121–250 — T2/T3/T4 混合，7×7 / 8×8
+  // L121–250 — T2/T3/T4 混合，7×7 / 8×8；aux only T0,T1
   // Large boards: noGuess+pin is too sparse; allow guess while keeping structure tags.
   if (id <= 250) {
     const size = id <= 180 ? 7 : 8;
-    const slot = id % 3;
-    const technique: TechniqueId = slot === 0 ? 'T2' : slot === 1 ? 'T3' : 'T4';
-    return {
+    const technique = primaryTechFor(id);
+    return withAllowed(id, {
       technique,
       size,
       requireNoGuess: false,
@@ -300,21 +350,15 @@ export function curriculumFor(id: number): Lesson {
       mode: 'mixed',
       stage: '高级B',
       preferMinRegionArea: 3,
-    };
+    });
   }
   // L251–400 — 跨技巧，8×8 / 9×9
   // 9×9 boards almost never hit exact requiredTech 2/3 uniquely; prefer T4 there.
-  // 8×8 keeps a T2/T3/T4 mix with structure flags.
+  // 8×8 T3 under k=2 gate is similarly sparse → primaryTechFor remaps to T4.
   if (id <= 400) {
     const size = id <= 320 ? 8 : 9;
-    let technique: TechniqueId;
-    if (size >= 9) {
-      technique = 'T4';
-    } else {
-      const slot = id % 3;
-      technique = slot === 0 ? 'T3' : slot === 1 ? 'T4' : 'T2';
-    }
-    return {
+    const technique = primaryTechFor(id);
+    return withAllowed(id, {
       technique,
       size,
       requireNoGuess: false,
@@ -325,10 +369,10 @@ export function curriculumFor(id: number): Lesson {
       mode: 'mixed',
       stage: '大师',
       preferMinRegionArea: 3,
-    };
+    });
   }
   // L401–500 — 9×9 极限，偏 T4
-  return {
+  return withAllowed(id, {
     technique: 'T4',
     size: 9,
     requireNoGuess: false,
@@ -337,7 +381,7 @@ export function curriculumFor(id: number): Lesson {
     mode: 'mixed',
     stage: '终局',
     preferMinRegionArea: 3,
-  };
+  });
 }
 
 /** Primary technique → first teach level id. */

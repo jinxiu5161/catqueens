@@ -45,6 +45,15 @@ interface SolverState {
   catSet: Set<number>;
 }
 
+interface AnnotateOpts {
+  t1Mode?: T1Mode;
+  initialCats?: number[];
+  /** If set, only these techs may be applied when stuck (omit = allow all). */
+  allowedTechs?: TechId[];
+  /** Pigeonhole combination size for T3 (default 2). */
+  pigeonK?: 2 | 3;
+}
+
 interface AnnotateStats {
   places: number;
   excludeApps: number;
@@ -61,6 +70,13 @@ interface AnnotateStats {
   t1Mode: T1Mode;
   /** Cats whose T1 clears have not been applied yet (e.g. initialCats). */
   pendingT1: Set<number>;
+  allowedTechs?: TechId[];
+  pigeonK: 2 | 3;
+}
+
+function techAllowed(stats: AnnotateStats, id: TechId): boolean {
+  if (!stats.allowedTechs) return true;
+  return stats.allowedTechs.includes(id);
 }
 
 function noteTech(stats: AnnotateStats, id: TechId): void {
@@ -265,6 +281,7 @@ function seedCatNoClear(state: SolverState, index: number, stats: AnnotateStats)
 /**
  * When T0 is stuck: apply pending T1 clears from seeded cats.
  * Bumps requiredTech to 1; firstAction kind is T1a/T1b from mode.
+ * Skipped when allowedTechs is set and does not include 1.
  */
 function applyPendingT1Clears(
   level: LevelDefinition,
@@ -273,6 +290,7 @@ function applyPendingT1Clears(
   record: boolean,
 ): boolean {
   if (stats.pendingT1.size === 0) return false;
+  if (!techAllowed(stats, 1)) return false;
   const mode = stats.t1Mode;
   for (const cat of [...stats.pendingT1].sort((a, b) => a - b)) {
     stats.pendingT1.delete(cat);
@@ -337,12 +355,12 @@ function applyT0(
   const cell = forced[0]!;
   if (!isCandidate(level, state, cell)) return false;
 
-  const cleared = placeCat(level, state, cell, stats.t1Mode);
+  placeCat(level, state, cell, stats.t1Mode);
   if (record) {
     stats.places += 1;
-    // T0 place never bumps requiredTech; auto T1 clears may appear in techCombo only.
+    // T0 place never bumps requiredTech. Bundled physics clears after a fresh
+    // place do not note tech 1 — only pending/stuck T1 notes tech 1.
     noteTech(stats, 0);
-    if (cleared.length > 0) noteTech(stats, 1);
     captureFirstT0(stats, cell, level);
   }
   return true;
@@ -355,6 +373,7 @@ function applyT2(
   stats: AnnotateStats,
   record: boolean,
 ): boolean {
+  if (!techAllowed(stats, 2)) return false;
   const size = level.size;
   const cands = listCandidates(level, state);
   const regionHas = Array.from({ length: size }, () => false);
@@ -426,14 +445,16 @@ function combos(arr: number[], n: number): number[][] {
   return out;
 }
 
-/** T3: k regions in exactly k lines → exclude foreign open cells on those lines. */
+/** T3: pigeonK regions in exactly pigeonK lines → exclude foreign open cells on those lines. */
 function applyT3(
   level: LevelDefinition,
   state: SolverState,
   stats: AnnotateStats,
   record: boolean,
 ): boolean {
+  if (!techAllowed(stats, 3)) return false;
   const size = level.size;
+  const k = stats.pigeonK;
   const cands = listCandidates(level, state);
   const regionHas = Array.from({ length: size }, () => false);
   for (const cat of state.cats) regionHas[level.regions[cat]!] = true;
@@ -445,6 +466,7 @@ function applyT3(
   for (let rid = 0; rid < size; rid++) {
     if (!regionHas[rid] && openByRegion[rid]!.length > 0) active.push(rid);
   }
+  if (active.length < k) return false;
 
   const tryAxis = (axis: 'row' | 'col'): boolean => {
     const regionLines: number[] = Array.from({ length: size }, () => 0);
@@ -457,42 +479,41 @@ function applyT3(
       regionLines[rid] = mask;
     }
 
-    for (let k = 2; k <= active.length; k++) {
-      for (const combo of combos(active, k)) {
-        let union = 0;
-        for (const rid of combo) union |= regionLines[rid]!;
-        if (popcount(union) !== k) continue;
+    // Only enumerate combinations of size pigeonK (default 2; k=3 only if requested).
+    for (const combo of combos(active, k)) {
+      let union = 0;
+      for (const rid of combo) union |= regionLines[rid]!;
+      if (popcount(union) !== k) continue;
 
-        const lines: number[] = [];
-        for (let i = 0; i < size; i++) if (union & (1 << i)) lines.push(i);
-        const regionSet = new Set(combo);
-        const exclude: number[] = [];
-        for (const i of cands) {
-          const line = axis === 'row' ? rowOf(i, size) : colOf(i, size);
-          if (!lines.includes(line)) continue;
-          if (regionSet.has(level.regions[i]!)) continue;
-          exclude.push(i);
-        }
-        if (exclude.length === 0) continue;
-
-        for (const i of exclude) state.blocked[i] = true;
-        if (record) {
-          stats.excludeApps += 1;
-          noteRequired(stats, 3);
-          const focus = new Set<number>();
-          for (const rid of combo) for (const c of openByRegion[rid]!) focus.add(c);
-          for (const i of exclude) focus.add(i);
-          captureFirstStuckExclude(stats, {
-            kind: 'T3',
-            excludeCells: exclude,
-            focusCells: [...focus].sort((a, b) => a - b),
-            regionIds: [...combo],
-            axis,
-            line: lines[0],
-          });
-        }
-        return true;
+      const lines: number[] = [];
+      for (let i = 0; i < size; i++) if (union & (1 << i)) lines.push(i);
+      const regionSet = new Set(combo);
+      const exclude: number[] = [];
+      for (const i of cands) {
+        const line = axis === 'row' ? rowOf(i, size) : colOf(i, size);
+        if (!lines.includes(line)) continue;
+        if (regionSet.has(level.regions[i]!)) continue;
+        exclude.push(i);
       }
+      if (exclude.length === 0) continue;
+
+      for (const i of exclude) state.blocked[i] = true;
+      if (record) {
+        stats.excludeApps += 1;
+        noteRequired(stats, 3);
+        const focus = new Set<number>();
+        for (const rid of combo) for (const c of openByRegion[rid]!) focus.add(c);
+        for (const i of exclude) focus.add(i);
+        captureFirstStuckExclude(stats, {
+          kind: 'T3',
+          excludeCells: exclude,
+          focusCells: [...focus].sort((a, b) => a - b),
+          regionIds: [...combo],
+          axis,
+          line: lines[0],
+        });
+      }
+      return true;
     }
     return false;
   };
@@ -585,6 +606,7 @@ function applyT4(
   record: boolean,
   depth: number,
 ): boolean {
+  if (!techAllowed(stats, 4)) return false;
   const cells = size2CandidateCells(level, state);
   for (const cell of cells) {
     if (!isCandidate(level, state, cell)) continue;
@@ -609,6 +631,8 @@ function applyT4(
       firstStuckExclude: null,
       t1Mode: stats.t1Mode,
       pendingT1: new Set(),
+      allowedTechs: stats.allowedTechs,
+      pigeonK: stats.pigeonK,
     };
     placeCat(level, trial, cell, stats.t1Mode);
     const outcome = solveFrom(level, trial, trialStats, false, depth);
@@ -679,12 +703,14 @@ function solutionMatches(level: LevelDefinition, cats: number[]): boolean {
 /**
  * Annotate which techniques are required to solve a Queens-like Cat Queens level.
  * Pass `initialCats` to seed cats without T1 clears (T1a/T1b guides).
+ * Pass `allowedTechs` to restrict stuck techniques; restricted failure → solved:false.
  */
 export function annotateLevel(
   level: LevelDefinition,
-  opts?: { t1Mode?: T1Mode; initialCats?: number[] },
+  opts?: AnnotateOpts,
 ): TechAnnotateResult {
   const t1Mode: T1Mode = opts?.t1Mode ?? 'full';
+  const pigeonK: 2 | 3 = opts?.pigeonK ?? 2;
   const state: SolverState = {
     blocked: Array.from({ length: level.size * level.size }, () => false),
     cats: [],
@@ -703,6 +729,8 @@ export function annotateLevel(
     firstStuckExclude: null,
     t1Mode,
     pendingT1: new Set(),
+    allowedTechs: opts?.allowedTechs,
+    pigeonK,
   };
 
   if (opts?.initialCats?.length) {
@@ -721,6 +749,7 @@ export function annotateLevel(
 
   return {
     requiredTech,
+    // Only techs that were actually applied (T0 places + stuck/pending excludes).
     techCombo: stats.techOrder.slice() as TechId[],
     chainLength: stats.places + stats.excludeApps + stats.tryBacktracks,
     branchDepth: stats.branchDepth,

@@ -22,6 +22,7 @@ import {
   annotateLevel,
   buildHintFromAction,
   type FirstActionKind,
+  type TechId,
 } from '../assets/scripts/core/level/TechSolver';
 import { singletonSolutionCats } from '../assets/scripts/core/level/TechniqueCoach';
 import { puzzleSolver } from '../assets/scripts/core/puzzle/PuzzleSolver';
@@ -308,7 +309,9 @@ export function linePinRegions(
 }
 
 /**
- * T2/T4: k regions whose cats sit in k lines are confined to those k lines.
+ * T3: k regions confined to k lines (pigeonhole).
+ * Soft: other regions MAY own cells inside the band (T3 excludes those).
+ * Hard confinement of pigeon regions outside the band is required for the structure.
  */
 export function pigeonholeRegions(
   size: number,
@@ -331,7 +334,8 @@ export function pigeonholeRegions(
     if (lineSet.has(line)) pigeonRids.push(rid);
   }
   if (pigeonRids.length !== k) return null;
-  const otherRids = Array.from({ length: size }, (_, i) => i).filter((r) => !pigeonRids.includes(r));
+  const pigeonSet = new Set(pigeonRids);
+  const otherRids = Array.from({ length: size }, (_, i) => i).filter((r) => !pigeonSet.has(r));
 
   const regions = Array.from({ length: size * size }, () => -1);
   for (let i = 0; i < size; i++) regions[solution[i]!] = i;
@@ -341,15 +345,16 @@ export function pigeonholeRegions(
     return lineSet.has(line);
   };
 
+  // Voronoi among all rids, but pigeon rids may only claim band cells.
   for (let idx = 0; idx < size * size; idx++) {
     if (regions[idx]! >= 0) continue;
     const r = rowOf(idx, size);
     const c = colOf(idx, size);
-    const pool = inPigeonBand(idx) ? pigeonRids : otherRids;
-    if (!pool.length) return null;
+    const inBand = inPigeonBand(idx);
     let best: number[] = [];
     let bestD = 1e9;
-    for (const rid of pool) {
+    for (let rid = 0; rid < size; rid++) {
+      if (pigeonSet.has(rid) && !inBand) continue;
       const s = solution[rid]!;
       const d = Math.abs(rowOf(s, size) - r) + Math.abs(colOf(s, size) - c);
       if (d < bestD) {
@@ -357,31 +362,21 @@ export function pigeonholeRegions(
         best = [rid];
       } else if (d === bestD) best.push(rid);
     }
-    regions[idx] = best[Math.floor(rand() * best.length)]!;
-  }
-
-  // Enforce confinement: pigeon regions cannot own cells outside the band
-  for (let idx = 0; idx < size * size; idx++) {
-    const rid = regions[idx]!;
-    if (pigeonRids.includes(rid) && !inPigeonBand(idx)) {
+    if (!best.length) {
       if (!otherRids.length) return null;
       regions[idx] = otherRids[Math.floor(rand() * otherRids.length)]!;
+    } else {
+      regions[idx] = best[Math.floor(rand() * best.length)]!;
     }
-    if (otherRids.includes(rid) && inPigeonBand(idx)) {
-      // leave to repair / voronoi among pigeon — reassign to nearest pigeon
-      let best = pigeonRids[0]!;
-      let bestD = 1e9;
-      const r = rowOf(idx, size);
-      const c = colOf(idx, size);
-      for (const prid of pigeonRids) {
-        const s = solution[prid]!;
-        const d = Math.abs(rowOf(s, size) - r) + Math.abs(colOf(s, size) - c);
-        if (d < bestD) {
-          bestD = d;
-          best = prid;
-        }
-      }
-      regions[idx] = best;
+  }
+
+  // Enforce: pigeon regions cannot own cells outside the band.
+  // Do NOT strip other regions from the band — those foreign cells are what T3 excludes.
+  for (let idx = 0; idx < size * size; idx++) {
+    const rid = regions[idx]!;
+    if (pigeonSet.has(rid) && !inPigeonBand(idx)) {
+      if (!otherRids.length) return null;
+      regions[idx] = otherRids[Math.floor(rand() * otherRids.length)]!;
     }
   }
 
@@ -555,6 +550,12 @@ function techNum(technique: TechniqueId): 0 | 1 | 2 | 3 | 4 {
   return ({ T0: 0, T1: 1, T2: 2, T3: 3, T4: 4 } as const)[technique];
 }
 
+function popcountLocal(mask: number): number {
+  let n = 0;
+  for (let t = mask; t; t >>= 1) n += t & 1;
+  return n;
+}
+
 function sizeCoef(size: number): number {
   if (size <= 4) return 0;
   if (size === 5) return 1;
@@ -583,18 +584,27 @@ function annotateOptsForLesson(
   level: LevelDefinition,
   lesson: Lesson,
   initialCats?: number[],
-): { t1Mode?: 'full' | 'a' | 'b'; initialCats?: number[] } | undefined {
-  if (lesson.technique !== 'T1') return undefined;
+): {
+  t1Mode?: 'full' | 'a' | 'b';
+  initialCats?: number[];
+  allowedTechs: TechId[];
+  pigeonK: 2;
+} {
+  const base = {
+    allowedTechs: lesson.allowedTechs.slice() as TechId[],
+    pigeonK: 2 as const,
+  };
+  if (lesson.technique !== 'T1') return base;
   const cat = initialCats?.[0] ?? pickSingletonCat(level);
   const t1Mode: 'full' | 'a' | 'b' =
     lesson.guideKey === 'T1a' ? 'a' : lesson.guideKey === 'T1b' ? 'b' : 'full';
-  if (cat == null) return { t1Mode };
-  return { t1Mode, initialCats: [cat] };
+  if (cat == null) return { ...base, t1Mode };
+  return { ...base, t1Mode, initialCats: [cat] };
 }
 
 /**
  * Hard gates. Soft may only widen search seeds upstream — never relaxes
- * requiredTech === techNum(lesson.technique).
+ * requiredTech === techNum(lesson.technique) or expands allowedTechs.
  */
 function matchesLesson(
   level: LevelDefinition,
@@ -606,11 +616,12 @@ function matchesLesson(
   const singles = flags.singletonCount;
   if (singles < lesson.minSingles || singles > lesson.maxSingles) return false;
   if (lesson.requireLinePin && !flags.hasLinePin) return false;
+  // T3: require real pigeonhole-2 — do not accept line-pin alone.
   if (lesson.requirePigeonhole === 2) {
-    if (!(flags.hasPigeonhole2 || flags.hasLinePin || soft)) return false;
+    if (!flags.hasPigeonhole2) return false;
   }
   if (lesson.requirePigeonhole === 3) {
-    if (!(flags.hasPigeonhole3 || flags.hasPigeonhole2 || flags.hasLinePin || soft)) return false;
+    if (!(flags.hasPigeonhole3 || soft)) return false;
   }
   if (lesson.preferDualPairs) {
     if (!(flags.size2RegionCount >= 1 || flags.hasLinePin || flags.hasPigeonhole2 || soft)) {
@@ -624,6 +635,9 @@ function matchesLesson(
 
   // Strict: requiredTech must exactly equal the lesson technique number.
   if (ann.requiredTech !== techNum(lesson.technique)) return false;
+
+  const allowed = new Set(lesson.allowedTechs);
+  if (!ann.techCombo.every((t) => allowed.has(t))) return false;
 
   if (lesson.requireNoGuess && !ann.noGuess) return false;
 
@@ -699,7 +713,12 @@ function attachGuideHint(level: LevelDefinition, lesson: Lesson): void {
     if (cat == null) return;
     level.prePlaceCats = [cat];
     const t1Mode = guideKey === 'T1a' ? 'a' : 'b';
-    const ann = annotateLevel(level, { t1Mode, initialCats: [cat] });
+    const ann = annotateLevel(level, {
+      t1Mode,
+      initialCats: [cat],
+      allowedTechs: lesson.allowedTechs.slice() as TechId[],
+      pigeonK: 2,
+    });
     if (ann.firstAction) {
       level.hint = buildHintFromAction(level, ann.firstAction, guideKey);
       return;
@@ -744,7 +763,10 @@ function attachGuideHint(level: LevelDefinition, lesson: Lesson): void {
     return;
   }
 
-  const ann = annotateLevel(level);
+  const ann = annotateLevel(level, {
+    allowedTechs: lesson.allowedTechs.slice() as TechId[],
+    pigeonK: 2,
+  });
   if (!ann.firstAction) return;
   const kind: FirstActionKind = ann.firstAction.kind as FirstActionKind;
   level.hint = buildHintFromAction(level, ann.firstAction, kind);
@@ -786,7 +808,9 @@ export function generateOne(
     const solution = placeSolution(size, rand);
     if (!solution) continue;
     const solKey = `${size}|${[...solution].sort((a, b) => a - b).join(',')}`;
-    if (opts.strictNewSolution && opts.usedSolutions.has(solKey)) continue;
+    // Always avoid known solutions when the pool tracks them (early same-size
+    // alternation + large-board strict mode).
+    if (opts.usedSolutions.has(solKey)) continue;
     if (
       opts.prevSolutionKey &&
       solKey === opts.prevSolutionKey &&
@@ -796,16 +820,14 @@ export function generateOne(
     }
 
     const strategies: Array<() => number[] | null> = [];
-    if (lesson.technique === 'T3' || lesson.requirePigeonhole === 2 || lesson.requirePigeonhole === 3) {
-      strategies.push(() => pigeonholeRegions(size, solution, rand, 3, rand() < 0.5 ? 'col' : 'row'));
+    let allowAssign: ((cell: number, rid: number) => boolean) | undefined;
+    if (lesson.technique === 'T3' || lesson.requirePigeonhole === 2) {
+      // T3: only pigeonhole k=2 (never k=3).
+      const axisHint: 'row' | 'col' = attempt % 2 === 0 ? 'col' : 'row';
+      strategies.push(() => pigeonholeRegions(size, solution, rand, 2, 'col'));
+      strategies.push(() => pigeonholeRegions(size, solution, rand, 2, 'row'));
+      strategies.push(() => pigeonholeRegions(size, solution, rand, 2, axisHint));
       strategies.push(() => pigeonholeRegions(size, solution, rand, 2, rand() < 0.5 ? 'col' : 'row'));
-      strategies.push(() => linePinRegions(size, solution, rand, 'row'));
-      strategies.push(() => linePinRegions(size, solution, rand, 'col'));
-      strategies.push(() => easyRegions(size, solution, rand, Math.max(0, lesson.maxSingles)));
-      if (size >= 7) {
-        strategies.push(() => voronoiRegions(size, solution, rand));
-        strategies.push(() => easyRegions(size, solution, rand, 2));
-      }
     } else if (lesson.requireLinePin || lesson.technique === 'T2') {
       const teachPin = lesson.mode === 'teach';
       const pinOpts = teachPin
@@ -843,7 +865,49 @@ export function generateOne(
     if (lesson.preferMinRegionArea && id >= 8) {
       regions = preferLargerRegions(size, solution, regions, lesson.preferMinRegionArea, rand);
     }
-    regions = tryMakeUnique(size, solution, regions, rand);
+    // For T3: preserve pigeonhole confinement during uniqueness repair —
+    // a pigeon rid (solution cat on a 2-line band that already forms PH) must
+    // not gain cells outside the lines its open cells currently occupy.
+    if (lesson.technique === 'T3' || lesson.requirePigeonhole === 2) {
+      const flags = analyzeTechniques({
+        id: 1,
+        size,
+        regions,
+        solution: [...solution].sort((a, b) => a - b),
+      });
+      if (flags.hasPigeonhole2) {
+        // Detect axis + band from current regions via solution cats of size-2 PH.
+        // Fallback: allow any assign (structure rechecked after).
+        allowAssign = (cell: number, rid: number) => {
+          const seed = solution[rid]!;
+          const cellR = rowOf(cell, size);
+          const cellC = colOf(cell, size);
+          const seedR = rowOf(seed, size);
+          const seedC = colOf(seed, size);
+          // Heuristic: if rid's current cells are confined to ≤2 rows or ≤2 cols,
+          // new cell must stay inside that bounding band.
+          let rowMask = 0;
+          let colMask = 0;
+          for (let i = 0; i < regions!.length; i++) {
+            if (regions![i] !== rid) continue;
+            rowMask |= 1 << rowOf(i, size);
+            colMask |= 1 << colOf(i, size);
+          }
+          const rowBits = popcountLocal(rowMask);
+          const colBits = popcountLocal(colMask);
+          if (rowBits > 0 && rowBits <= 2 && !((rowMask >> cellR) & 1) && rowBits === 2) {
+            return false;
+          }
+          if (colBits > 0 && colBits <= 2 && !((colMask >> cellC) & 1) && colBits === 2) {
+            return false;
+          }
+          void seedR;
+          void seedC;
+          return true;
+        };
+      }
+    }
+    regions = tryMakeUnique(size, solution, regions, rand, allowAssign);
     if (!regions) continue;
 
     const level: LevelDefinition = {
@@ -1010,32 +1074,26 @@ function generateCandidate(
             : 240;
 
   for (let retry = 0; retry < maxRetry; retry++) {
-    // Soft may only widen search seeds / structure — never requiredTech gates.
-    let softLesson: Lesson = lesson;
-    if (retry > maxRetry * 0.55 && lesson.requirePigeonhole === 3) {
-      softLesson = { ...lesson, requirePigeonhole: 2, maxSingles: Math.max(lesson.maxSingles, 2) };
-    } else if (retry > maxRetry * 0.5 && lesson.preferDualPairs) {
+    // Soft may only widen search seeds / structure — never expand allowedTechs
+    // or relax requiredTech equality (matchesLesson still enforces both).
+    let softLesson: Lesson = { ...lesson, allowedTechs: lesson.allowedTechs.slice() };
+    if (retry > maxRetry * 0.5 && lesson.preferDualPairs) {
       softLesson = {
-        ...lesson,
+        ...softLesson,
         preferDualPairs: false,
         maxSingles: Math.max(3, lesson.maxSingles),
       };
     } else if (retry > maxRetry * 0.25 && lesson.size >= 7 && lesson.requireLinePin) {
       // Keep requiredTech===2; drop static line-pin flag so emergent T2 can match.
       softLesson = {
-        ...lesson,
+        ...softLesson,
         requireLinePin: false,
         maxSingles: Math.max(2, lesson.maxSingles),
       };
-    } else if (retry > maxRetry * 0.35 && lesson.size >= 7 && lesson.requirePigeonhole) {
-      softLesson = {
-        ...lesson,
-        requirePigeonhole: undefined,
-        maxSingles: Math.max(2, lesson.maxSingles),
-      };
     } else if (retry > maxRetry * 0.5 && lesson.technique === 'T4') {
-      softLesson = { ...lesson, maxSingles: Math.max(lesson.maxSingles, 2) };
+      softLesson = { ...softLesson, maxSingles: Math.max(lesson.maxSingles, 2) };
     }
+    // Never soft-drop requirePigeonhole / expand allowedTechs.
     // Large mix stages: curriculum already sets requireNoGuess false when needed.
     if (retry > 0 && retry % 50 === 0) {
       console.log(
@@ -1222,11 +1280,16 @@ function main(): void {
       // Stage-first / guides: sample a few candidates and prefer near band floor
       // so later flex levels can still ascend within the stage.
       const samples: LevelDefinition[] = [];
+      // Restricted-aux stages (高级B) and large T3 are expensive to sample.
       const sampleN =
         STAGE_FIRST_DIP_IDS.has(id) || lesson.guide
           ? lesson.size >= 8
-            ? 3
-            : 6
+            ? 2
+            : lesson.technique === 'T3' && lesson.allowedTechs.length <= 3
+              ? 2
+              : lesson.size >= 7
+                ? 3
+                : 6
           : 1;
       for (let s = 0; s < sampleN; s++) {
         const level = generateCandidate(id, lesson, seed, {
@@ -1478,6 +1541,35 @@ function main(): void {
 
   writePack(allLevels, monoInfos);
 
+  // Post-check: every level must solve under lesson.allowedTechs with exact primary.
+  const bad: Array<{ id: number; reason: string }> = [];
+  for (const l of allLevels) {
+    const lesson = curriculumFor(l.id);
+    const opts = annotateOptsForLesson(l, lesson, l.prePlaceCats);
+    const ann = annotateLevel(l, opts);
+    if (!ann.solved) {
+      bad.push({ id: l.id, reason: 'unsolved under allowedTechs' });
+      continue;
+    }
+    if (ann.requiredTech !== techNum(lesson.technique)) {
+      bad.push({
+        id: l.id,
+        reason: `requiredTech ${ann.requiredTech} !== primary ${techNum(lesson.technique)}`,
+      });
+      continue;
+    }
+    const allowed = new Set(lesson.allowedTechs);
+    const outside = ann.techCombo.filter((t) => !allowed.has(t));
+    if (outside.length) {
+      bad.push({ id: l.id, reason: `techCombo outside allowed: ${outside.join(',')}` });
+    }
+  }
+  if (bad.length) {
+    console.error(`Post-check failed: ${bad.length} bad levels`, bad.slice(0, 30));
+    process.exit(1);
+  }
+  console.log(`Post-check ok: bad-count=0 / ${allLevels.length}`);
+
   const byTier: Record<string, number> = {};
   const bySize: Record<number, number> = {};
   const byTech: Record<string, number> = {};
@@ -1490,6 +1582,7 @@ function main(): void {
     JSON.stringify(
       {
         total: allLevels.length,
+        badCount: 0,
         noGuess: allLevels.filter((l) => l.noGuess).length,
         byTech,
         byTier,
