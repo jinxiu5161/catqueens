@@ -644,6 +644,9 @@ function matchesLesson(
   if (lesson.guideKey === 'T1a' && ann.firstAction?.kind !== 'T1a') return false;
   if (lesson.guideKey === 'T1b' && ann.firstAction?.kind !== 'T1b') return false;
   if (lesson.guideKey === 'T2' && ann.firstAction?.kind !== 'T2') return false;
+  if (lesson.guideKey === 'T3' && ann.firstAction?.kind !== 'T3') return false;
+  // T4 teach: first stuck move should be a what-if when possible; do not hard-fail
+  // generation if a legal T4 board opens with T0 (still requiredTech===4).
   if (lesson.guideKey === 'T0' && ann.firstAction?.kind !== 'T0') return false;
   if (lesson.requireLinePin && lesson.maxSingles === 0 && ann.firstAction?.kind !== 'T2') {
     return false;

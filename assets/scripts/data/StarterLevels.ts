@@ -1,4 +1,4 @@
-import type { LevelsFile } from +../core/level/LevelDefinition;
+import type { LevelsFile } from '../core/level/LevelDefinition';
 
 /** Auto-generated technique curriculum pack. Re-run: npm run generate:levels */
 export const STARTER_LEVELS: LevelsFile = {
@@ -913,22 +913,19 @@ export const STARTER_LEVELS: LevelsFile = {
       "id": 16,
       "size": 5,
       "regions": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3,
-        1,
-        1,
         1,
         0,
-        3,
-        3,
+        0,
+        0,
+        0,
+        1,
+        1,
         2,
         2,
         0,
+        4,
+        4,
+        2,
         3,
         3,
         4,
@@ -937,14 +934,17 @@ export const STARTER_LEVELS: LevelsFile = {
         3,
         3,
         4,
-        4
+        4,
+        4,
+        3,
+        3
       ],
       "solution": [
-        0,
-        7,
-        14,
-        16,
-        23
+        3,
+        5,
+        12,
+        19,
+        21
       ],
       "chapterId": 1,
       "difficulty": 5,
@@ -956,20 +956,25 @@ export const STARTER_LEVELS: LevelsFile = {
       "stage": "进阶",
       "requiredTech": 3,
       "techCombo": [
-        2,
         3,
-        0
+        0,
+        2
       ],
-      "chainLength": 9,
+      "chainLength": 7,
       "branchDepth": 0,
       "guide": true,
       "hint": {
-        "text": "{region} 完全落在同一行，这一行的猫一定在它里面",
+        "text": "这两个色区占了同样多的行，这些行的猫只能来自它们",
         "textParams": {
-          "region": 1,
-          "row": 1
+          "region": 0,
+          "row": 0
         },
         "highlightCells": [
+          0,
+          1,
+          2,
+          3,
+          4,
           5,
           6,
           7,
@@ -977,13 +982,14 @@ export const STARTER_LEVELS: LevelsFile = {
           9
         ],
         "highlightRegions": [
+          0,
           1
         ],
         "crossOutCells": [
-          5,
-          6
+          7,
+          8
         ],
-        "pointerCell": 5,
+        "pointerCell": 7,
         "step": 1,
         "totalSteps": 1
       }
