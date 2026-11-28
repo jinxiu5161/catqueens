@@ -1,0 +1,20 @@
+{
+  "name": "catqueens",
+  "uuid": "a7c3e91f-4b2d-4e8a-9f1c-6d5e2a8b0c4d",
+  "version": "1.0.0",
+  "creator": {
+    "version": "3.8.5"
+  },
+  "description": "猫咪皇后 · Cat Queens — Cocos Creator 3.x 单机解谜",
+  "scripts": {
+    "test": "vitest run",
+    "qa:levels": "tsx scripts/qa-levels.ts",
+    "qa:unique": "tsx scripts/qa-levels.ts --unique",
+    "generate:levels": "tsx scripts/generate-levels.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

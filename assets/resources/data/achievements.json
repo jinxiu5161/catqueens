@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "achievements": [
+    {
+      "id": "clear_10",
+      "category": "progress",
+      "counter": "clears",
+      "threshold": 10,
+      "ticketReward": 1,
+      "nameKey": "ach.clear_10"
+    },
+    {
+      "id": "clear_50",
+      "category": "progress",
+      "counter": "clears",
+      "threshold": 50,
+      "ticketReward": 2,
+      "nameKey": "ach.clear_50"
+    }
+  ]
+}
